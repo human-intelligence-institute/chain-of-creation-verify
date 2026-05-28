@@ -42,3 +42,8 @@ type Hash [32]byte
 func hashBytes(b []byte) Hash {
 	return Hash(blake3.Sum256(b))
 }
+
+// HashContent returns the BLAKE3-256 digest of media bytes — the same function
+// used to populate an Attestation's ExactHash. Verifiers recompute it over a
+// candidate file to test for a byte-identical match.
+func HashContent(b []byte) Hash { return hashBytes(b) }
