@@ -1,0 +1,113 @@
+// Package identity issues and resolves IdentityBinding leaves. HII signs every
+// binding with its identity-root key; a verifier uses the bindings published in
+// the log to map an attestation's signing key to a creator — and to whether the
+// signing key is HII-custodied or the creator's own.
+package identity
+
+import (
+	"crypto/ed25519"
+	"errors"
+	"time"
+
+	"github.com/human-intelligence-institute/chain-of-creation/internal/leaf"
+)
+
+// Issuer holds the HII identity-root key and mints signed IdentityBindings.
+type Issuer struct {
+	root ed25519.PrivateKey
+}
+
+// NewIssuer wraps the HII identity-root private key.
+func NewIssuer(root ed25519.PrivateKey) *Issuer { return &Issuer{root: root} }
+
+// RootPublicKey returns the issuer's public key, which verifiers configure as
+// their trusted root.
+func (i *Issuer) RootPublicKey() [32]byte {
+	var pk [32]byte
+	copy(pk[:], i.root.Public().(ed25519.PublicKey))
+	return pk
+}
+
+// Issue creates and signs a binding from a signing key to a creator. Use
+// leaf.KeyHIICustodial when HII holds the signing key, or leaf.KeySelfManaged
+// when the creator controls it.
+func (i *Issuer) Issue(creatorID string, authorizedKey [32]byte, kt leaf.KeyType, validFrom time.Time) *leaf.IdentityBinding {
+	b := &leaf.IdentityBinding{
+		CreatorID:     creatorID,
+		AuthorizedKey: authorizedKey,
+		KeyType:       kt,
+		ValidFrom:     uint64(validFrom.UnixMilli()),
+	}
+	b.Sign(i.root)
+	return b
+}
+
+// Resolution is what a verifier learns about an attestation's signing key.
+type Resolution struct {
+	CreatorID string
+	KeyType   leaf.KeyType
+	ValidFrom time.Time
+}
+
+// Custodial reports whether HII holds the signing key (and therefore produced
+// the attestation signature itself) versus merely registering a key the creator
+// controls.
+func (r Resolution) Custodial() bool { return r.KeyType == leaf.KeyHIICustodial }
+
+// Resolver indexes accepted bindings by their authorized signing key. It only
+// accepts bindings signed by the configured trusted root.
+type Resolver struct {
+	trustedRoot [32]byte
+	byKey       map[[32]byte][]*leaf.IdentityBinding
+}
+
+// NewResolver creates a resolver that trusts only bindings issued by trustedRoot.
+func NewResolver(trustedRoot [32]byte) *Resolver {
+	return &Resolver{trustedRoot: trustedRoot, byKey: map[[32]byte][]*leaf.IdentityBinding{}}
+}
+
+var (
+	// ErrUntrustedIssuer is returned when a binding's issuer is not the trusted root.
+	ErrUntrustedIssuer = errors.New("identity: binding issuer is not the trusted root")
+	// ErrBadSignature is returned when a binding's issuer signature does not verify.
+	ErrBadSignature = errors.New("identity: binding signature invalid")
+)
+
+// Add validates and indexes a binding. A binding is accepted only when its
+// IssuerPubKey equals the trusted root and its signature verifies.
+func (r *Resolver) Add(b *leaf.IdentityBinding) error {
+	if b.IssuerPubKey != r.trustedRoot {
+		return ErrUntrustedIssuer
+	}
+	if !b.Verify() {
+		return ErrBadSignature
+	}
+	r.byKey[b.AuthorizedKey] = append(r.byKey[b.AuthorizedKey], b)
+	return nil
+}
+
+// Resolve returns the identity bound to signerKey effective at time at. When a
+// key has several bindings (e.g. re-registration), it returns the one with the
+// greatest ValidFrom not after at. The bool is false when no binding is in
+// effect for the key at that time.
+func (r *Resolver) Resolve(signerKey [32]byte, at time.Time) (Resolution, bool) {
+	bindings := r.byKey[signerKey]
+	atMs := uint64(at.UnixMilli())
+	var best *leaf.IdentityBinding
+	for _, b := range bindings {
+		if b.ValidFrom > atMs {
+			continue
+		}
+		if best == nil || b.ValidFrom > best.ValidFrom {
+			best = b
+		}
+	}
+	if best == nil {
+		return Resolution{}, false
+	}
+	return Resolution{
+		CreatorID: best.CreatorID,
+		KeyType:   best.KeyType,
+		ValidFrom: time.UnixMilli(int64(best.ValidFrom)),
+	}, true
+}
