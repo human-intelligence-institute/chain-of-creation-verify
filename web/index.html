@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>chain-of-creation — verifier</title>
+  <style>
+    body { font: 15px/1.5 system-ui, sans-serif; max-width: 760px; margin: 2rem auto; padding: 0 1rem; }
+    label { display: block; font-weight: 600; margin: 1rem 0 0.25rem; }
+    textarea { width: 100%; box-sizing: border-box; font-family: ui-monospace, monospace; }
+    button { margin-top: 1rem; padding: 0.5rem 1rem; font-size: 1rem; }
+    pre { background: #f5f5f5; padding: 1rem; overflow: auto; white-space: pre-wrap; word-break: break-all; }
+    .status { color: #666; }
+  </style>
+</head>
+<body>
+  <h1>chain-of-creation verifier</h1>
+  <p class="status" id="status">Loading WebAssembly…</p>
+
+  <label for="leaf">Leaf (base64)</label>
+  <textarea id="leaf" rows="4" placeholder="base64-encoded canonical leaf bytes"></textarea>
+
+  <label for="media">Media (base64, optional — to content-match an attestation)</label>
+  <textarea id="media" rows="4" placeholder="base64-encoded media file"></textarea>
+
+  <button id="verify" disabled>Verify</button>
+
+  <h2>Result</h2>
+  <pre id="result">—</pre>
+
+  <!-- wasm_exec.js is provided by the Go toolchain; build.sh copies it here. -->
+  <script src="wasm_exec.js"></script>
+  <script>
+    const go = new Go();
+    const status = document.getElementById("status");
+    const btn = document.getElementById("verify");
+
+    WebAssembly.instantiateStreaming(fetch("cocverify.wasm"), go.importObject)
+      .then((res) => {
+        go.run(res.instance);
+        status.textContent = "Ready. Paste a base64 leaf and click Verify.";
+        btn.disabled = false;
+      })
+      .catch((err) => { status.textContent = "Failed to load WebAssembly: " + err; });
+
+    btn.addEventListener("click", () => {
+      const leaf = document.getElementById("leaf").value.trim();
+      const media = document.getElementById("media").value.trim();
+      // cocVerifyLeaf is exported by the Go WebAssembly module.
+      const json = media ? cocVerifyLeaf(leaf, media) : cocVerifyLeaf(leaf);
+      try {
+        document.getElementById("result").textContent =
+          JSON.stringify(JSON.parse(json), null, 2);
+      } catch {
+        document.getElementById("result").textContent = json;
+      }
+    });
+  </script>
+</body>
+</html>
