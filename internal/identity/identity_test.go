@@ -112,6 +112,60 @@ func TestAddRejectsTamperedBinding(t *testing.T) {
 	}
 }
 
+func TestResolverTrustsMultipleRootsAcrossRotation(t *testing.T) {
+	_, oldRoot := key(t)
+	_, newRoot := key(t)
+	oldIssuer, newIssuer := NewIssuer(oldRoot), NewIssuer(newRoot)
+	signerPub, _ := key(t)
+	sk := pubArray(signerPub)
+
+	// A binding issued under the old root, before rotation, must stay verifiable.
+	t0 := time.UnixMilli(1_700_000_000_000)
+	oldBinding := oldIssuer.Issue("creator-1", sk, leaf.KeyHIICustodial, t0)
+	// A new binding under the new root after rotation.
+	signer2, _ := key(t)
+	sk2 := pubArray(signer2)
+	newBinding := newIssuer.Issue("creator-2", sk2, leaf.KeyHIICustodial, t0.Add(48*time.Hour))
+
+	// Verifier configured with the new root as primary and the old root retained.
+	r := NewResolver(newIssuer.RootPublicKey())
+	r.TrustRoot(oldIssuer.RootPublicKey(), time.Time{}) // no cutoff: trust old bindings forever
+	if err := r.Add(oldBinding); err != nil {
+		t.Fatalf("old-root binding should remain verifiable: %v", err)
+	}
+	if err := r.Add(newBinding); err != nil {
+		t.Fatalf("new-root binding should verify: %v", err)
+	}
+	if res, ok := r.Resolve(sk, t0.Add(time.Hour)); !ok || res.CreatorID != "creator-1" {
+		t.Fatalf("old binding did not resolve: %q ok=%v", res.CreatorID, ok)
+	}
+}
+
+func TestResolverRootNotAfterCutoff(t *testing.T) {
+	_, oldRoot := key(t)
+	_, newRoot := key(t)
+	oldIssuer := NewIssuer(oldRoot)
+	signerPub, _ := key(t)
+	sk := pubArray(signerPub)
+
+	cutoff := time.UnixMilli(1_700_000_000_000)
+	// Old root retained but only up to the rotation/compromise time.
+	r := NewResolver(NewIssuer(newRoot).RootPublicKey())
+	r.TrustRoot(oldIssuer.RootPublicKey(), cutoff)
+
+	// A binding from the old root dated AFTER the cutoff (e.g. minted by an
+	// attacker who stole the rotated-out key) must be rejected.
+	forged := oldIssuer.Issue("victim", sk, leaf.KeyHIICustodial, cutoff.Add(time.Hour))
+	if err := r.Add(forged); err != ErrRootExpired {
+		t.Fatalf("expected ErrRootExpired for post-cutoff binding, got %v", err)
+	}
+	// A binding dated before the cutoff is still fine.
+	legit := oldIssuer.Issue("creator", sk, leaf.KeyHIICustodial, cutoff.Add(-time.Hour))
+	if err := r.Add(legit); err != nil {
+		t.Fatalf("pre-cutoff binding should verify: %v", err)
+	}
+}
+
 func TestResolveUnknownKey(t *testing.T) {
 	_, root := key(t)
 	r := NewResolver(NewIssuer(root).RootPublicKey())

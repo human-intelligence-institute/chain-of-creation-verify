@@ -54,36 +54,77 @@ type Resolution struct {
 // controls.
 func (r Resolution) Custodial() bool { return r.KeyType == leaf.KeyHIICustodial }
 
-// Resolver indexes accepted bindings by their authorized signing key. It only
-// accepts bindings signed by the configured trusted root.
-type Resolver struct {
-	trustedRoot [32]byte
-	byKey       map[[32]byte][]*leaf.IdentityBinding
+// trustedRoot is an accepted issuer key with an optional cutoff. When notAfter
+// is non-zero, bindings from this root whose ValidFrom is after it are rejected.
+type trustedRoot struct {
+	key      [32]byte
+	notAfter uint64 // ms; 0 = no cutoff
 }
 
-// NewResolver creates a resolver that trusts only bindings issued by trustedRoot.
-func NewResolver(trustedRoot [32]byte) *Resolver {
-	return &Resolver{trustedRoot: trustedRoot, byKey: map[[32]byte][]*leaf.IdentityBinding{}}
+// Resolver indexes accepted bindings by their authorized signing key. It accepts
+// bindings signed by any of its trusted roots — supporting identity-root key
+// rotation, where bindings from the previous root must stay verifiable.
+type Resolver struct {
+	roots []trustedRoot
+	byKey map[[32]byte][]*leaf.IdentityBinding
+}
+
+// NewResolver creates a resolver that trusts bindings issued by root. Add
+// further roots (e.g. a rotated-out predecessor) with TrustRoot.
+func NewResolver(root [32]byte) *Resolver {
+	return &Resolver{
+		roots: []trustedRoot{{key: root}},
+		byKey: map[[32]byte][]*leaf.IdentityBinding{},
+	}
+}
+
+// TrustRoot adds an additional accepted issuer root. When notAfter is non-zero,
+// bindings from this root with a ValidFrom after notAfter are rejected: use it
+// to keep a rotated-out root's earlier bindings verifiable while refusing to
+// honor anything it "issued" past the rotation/compromise time.
+func (r *Resolver) TrustRoot(key [32]byte, notAfter time.Time) {
+	var na uint64
+	if !notAfter.IsZero() {
+		na = uint64(notAfter.UnixMilli())
+	}
+	r.roots = append(r.roots, trustedRoot{key: key, notAfter: na})
 }
 
 var (
-	// ErrUntrustedIssuer is returned when a binding's issuer is not the trusted root.
-	ErrUntrustedIssuer = errors.New("identity: binding issuer is not the trusted root")
+	// ErrUntrustedIssuer is returned when a binding's issuer is not a trusted root.
+	ErrUntrustedIssuer = errors.New("identity: binding issuer is not a trusted root")
 	// ErrBadSignature is returned when a binding's issuer signature does not verify.
 	ErrBadSignature = errors.New("identity: binding signature invalid")
+	// ErrRootExpired is returned when a binding is signed by a trusted root but its
+	// ValidFrom is after that root's notAfter cutoff.
+	ErrRootExpired = errors.New("identity: binding is past its issuer root's cutoff")
 )
 
 // Add validates and indexes a binding. A binding is accepted only when its
-// IssuerPubKey equals the trusted root and its signature verifies.
+// IssuerPubKey matches a trusted root, it is within that root's cutoff, and its
+// signature verifies.
 func (r *Resolver) Add(b *leaf.IdentityBinding) error {
-	if b.IssuerPubKey != r.trustedRoot {
+	root, ok := r.matchRoot(b.IssuerPubKey)
+	if !ok {
 		return ErrUntrustedIssuer
+	}
+	if root.notAfter != 0 && b.ValidFrom > root.notAfter {
+		return ErrRootExpired
 	}
 	if !b.Verify() {
 		return ErrBadSignature
 	}
 	r.byKey[b.AuthorizedKey] = append(r.byKey[b.AuthorizedKey], b)
 	return nil
+}
+
+func (r *Resolver) matchRoot(k [32]byte) (trustedRoot, bool) {
+	for _, rt := range r.roots {
+		if rt.key == k {
+			return rt, true
+		}
+	}
+	return trustedRoot{}, false
 }
 
 // Resolve returns the identity bound to signerKey effective at time at. When a
