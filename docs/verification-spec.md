@@ -7,13 +7,12 @@ implementation (`pkg/cocverify`, compiled to WebAssembly in `web/`), porting it,
 or auditing it.
 
 > **Scope of this version.** This spec covers **leaf parsing, Ed25519 signatures,
-> content matching** (exact hash + fuzzy digest), and **log-inclusion proofs**
-> (§8). It does **not** yet cover **identity resolution** (mapping a signing key to
-> a creator) — that remains Phase 2b and will extend this spec. A passing
+> content matching** (exact hash + fuzzy digest), **log-inclusion proofs** (§8), and
+> **identity resolution** (mapping a signing key to a creator, §9). A passing
 > content+signature check means "this leaf is well-formed, correctly signed, and
-> your file matches it"; adding the §8 inclusion check proves the leaf is
-> **committed in the published log** under a checkpoint signed by the log's pinned
-> key.
+> your file matches it"; the §8 inclusion check proves the leaf is **committed in
+> the published log**; the §9 identity check proves **which creator HII vouched the
+> signing key for** at submission time.
 
 ## 1. Trust model — what each check is worth
 
@@ -23,7 +22,7 @@ or auditing it.
 | Signature | Ed25519 | **Yes, universally** | **Strong** — proves the leaf was signed by the holder of `SignerPubKey` |
 | Fuzzy content match | `simhash-text-v1` / `phash-dct-64` (bespoke) | **Only by running our reference** (or a faithful port) | **Advisory** — see below |
 | Log inclusion | RFC6962 Merkle proof under a pinned-key checkpoint (§8) | **Yes** — fetch checkpoint + tiles, reconstruct the proof | **Strong** — proves the leaf is committed in the published log |
-| Identity (key → creator) | Ed25519-signed `IdentityBinding` | Phase 2b | n/a yet |
+| Identity (key → creator) | Ed25519-signed `IdentityBinding`, proven included (§9) | **Yes** — verify the binding named by the receipt | **Strong** (for HII's vouch) — proves HII bound the key to the creator and logged it |
 
 **The fuzzy digest is a similarity index, not a cryptographic commitment.** Because
 the algorithm and its parameters are public, a fuzzy match is *steerable* and must be
@@ -263,7 +262,67 @@ under a checkpoint signed by the pinned key, **as of the checkpoint you fetched*
 does **not** prove the log never forked or rewound over time — that needs consistency
 proofs between checkpoints over time (a later revision) and live witnessing.
 
-## 9. Versioning
+## 9. Identity resolution
+
+Inclusion proves a leaf is in the log; identity answers "whose key signed it." HII
+issues an `IdentityBinding` (§3.2) mapping a signing key to a creator, signed by its
+**identity-root key** and stored in the same log. Identity resolution does **not**
+search the log: at any scale, the verifier is handed the binding's location and
+verifies exactly that one binding.
+
+### 9.1 The receipt
+
+A record's portable **receipt** is verification metadata (off-leaf, not signed):
+
+```json
+{ "leaf": "<base64 attestation leaf>", "index": <attestation log index>,
+  "binding_index": <binding log index> }
+```
+
+`binding_index` is the log index of the creator's `IdentityBinding`. It is returned by
+the custodial submit response (`binding_index`) at certification time. The receipt is
+self-authenticating: a wrong `binding_index` cannot forge anything — the verifier reads
+that exact leaf and checks it is signed by the pinned identity root **and** authorizes
+the attestation's `SignerPubKey`, so a bad pointer simply fails to resolve.
+
+### 9.2 Second pinned anchor — the identity root
+
+The verifier pins the HII **identity-root public key(s)** (hex Ed25519), separately
+from the checkpoint key, and accepts a *set* for rotation (bindings issued by a
+rotated-out root stay verifiable, optionally up to a cutoff).
+
+### 9.3 Procedure
+
+Given the attestation and `binding_index`:
+
+1. Fetch + verify the checkpoint (§8.2) → tree `size`, `root`.
+2. If `binding_index ≥ size`, the binding is not committed — unresolved.
+3. Read the binding leaf at `binding_index` from the entry bundle that holds it
+   (bundle `binding_index / 256`, offset `binding_index % 256`).
+4. **Prove the binding leaf is included** (§8.3) — a binding that is not committed in
+   the log is not trusted, even if validly signed.
+5. Decode it as an `IdentityBinding`; verify `IssuerSignature` against a pinned
+   identity root.
+6. Accept only if it **authorizes the attestation's `SignerPubKey`** and its
+   `ValidFrom ≤ Attestation.SubmittedAt`. When a key has several bindings, the one with
+   the greatest `ValidFrom` not after `SubmittedAt` wins.
+
+The result reports the `CreatorID`, the `KeyType` (HII-custodial vs self-managed), and
+that the binding was proven included. Reference: `pkg/cocverify/identity.go`; the
+browser export is
+`cocVerifyIdentity(leafB64, bindingIndex, readBaseURL, origin, checkpointVkey, identityRootsHex)`.
+
+### 9.4 Semantics and scope
+
+Resolution is **effective-at-submission**: provenance verifies a historical event, so
+the binding in force at the attestation's `SubmittedAt` is the authoritative one. "Is
+this key valid *now* / has it been revoked" is a different, current-status question and
+is **out of scope**. Likewise, resolving a **bare signing key with no receipt**, or
+proving **no binding exists** for a key (non-membership), is not covered here — that
+needs a verifiable key→binding map (key-transparency), a **future** capability,
+deliberately not built while records carry their own binding.
+
+## 10. Versioning
 
 This spec is **v1**, matching `AlgorithmID` values `simhash-text-v1` and
 `phash-dct-64`. Any change to tokenization, hashing, bit ordering, thresholds, or the

@@ -37,21 +37,29 @@
   <p class="hint">Offline reference verifier — runs entirely in your browser (WebAssembly). Your media file is never uploaded; log artifacts (checkpoint + tiles) are fetched read-only to prove inclusion.</p>
   <p class="status" id="status">Loading WebAssembly…</p>
 
+  <label for="receipt">Receipt (JSON)<span class="hint"> — optional; paste <code>{"leaf","index","binding_index"}</code> to auto-fill the fields below</span></label>
+  <textarea id="receipt" rows="3" placeholder='{"leaf":"...","index":0,"binding_index":0}'></textarea>
+
   <label for="leaf">Leaf (base64)<span class="hint"> — the canonical leaf bytes from the log record</span></label>
   <textarea id="leaf" rows="4" placeholder="base64-encoded canonical leaf bytes"></textarea>
 
   <label for="media">Media file<span class="hint"> — optional; the work you want to check against this attestation</span></label>
   <input type="file" id="media" />
 
-  <label for="index">Log index<span class="hint"> — optional; from the submit receipt. Provide it to check log inclusion.</span></label>
+  <label for="index">Log index<span class="hint"> — optional; from the receipt. Provide it to check log inclusion.</span></label>
   <input type="number" id="index" min="0" step="1" placeholder="e.g. 0" />
 
+  <label for="binding_index">Binding index<span class="hint"> — optional; from the receipt. Provide it to resolve the creator identity.</span></label>
+  <input type="number" id="binding_index" min="0" step="1" placeholder="e.g. 0" />
+
   <fieldset>
-    <legend>Log configuration (the pinned trust anchor — part of this verifier, not taken from the server)</legend>
+    <legend>Log configuration (the pinned trust anchors — part of this verifier, not taken from the server)</legend>
     <label for="origin">Origin<span class="hint"> — the log's checkpoint name</span></label>
     <input type="text" id="origin" placeholder="e.g. chain-of-creation" />
     <label for="vkey">Checkpoint public key (note vkey)</label>
     <input type="text" id="vkey" placeholder="origin+xxxxxxxx+Base64Key" />
+    <label for="idroot">Identity-root public key(s)<span class="hint"> — hex Ed25519; comma-separate a set for rotation</span></label>
+    <input type="text" id="idroot" placeholder="64-hex Ed25519 public key" />
     <label for="baseurl">Read base URL</label>
     <input type="text" id="baseurl" placeholder="https://chain.humancreator.com/" />
   </fieldset>
@@ -72,7 +80,7 @@
     // the target log's published values; the fields above let you override for
     // local testing. The verifier ALWAYS verifies the checkpoint against this key
     // — never the key the server presents.
-    const CONFIG = { origin: "", vkey: "", baseUrl: "" };
+    const CONFIG = { origin: "", vkey: "", idRoot: "", baseUrl: "" };
 
     const go = new Go();
     const status = document.getElementById("status");
@@ -83,7 +91,19 @@
     // Prefill log-config fields from CONFIG.
     document.getElementById("origin").value = CONFIG.origin;
     document.getElementById("vkey").value = CONFIG.vkey;
+    document.getElementById("idroot").value = CONFIG.idRoot;
     document.getElementById("baseurl").value = CONFIG.baseUrl;
+
+    // Pasting a receipt JSON auto-fills leaf / index / binding_index.
+    document.getElementById("receipt").addEventListener("input", (e) => {
+      const txt = e.target.value.trim();
+      if (!txt) return;
+      let r;
+      try { r = JSON.parse(txt); } catch { return; }
+      if (typeof r.leaf === "string") document.getElementById("leaf").value = r.leaf;
+      if (r.index !== undefined) document.getElementById("index").value = r.index;
+      if (r.binding_index !== undefined) document.getElementById("binding_index").value = r.binding_index;
+    });
 
     WebAssembly.instantiateStreaming(fetch("cocverify.wasm"), go.importObject)
       .then((res) => {
@@ -179,13 +199,40 @@
         record as unproven.</div>`;
     }
 
+    // Render the identity section. `id` is the IdentityResult JSON, null when not
+    // attempted, or an {error} object on failure.
+    function renderIdentity(id, attempted) {
+      if (!attempted) {
+        return `<div class="banner"><strong>Identity not resolved.</strong> Provide a binding index and the
+          identity-root key to resolve the signing key to a creator.</div>`;
+      }
+      if (id && id.error) {
+        return `<div class="err"><strong>Identity check failed:</strong> ${id.error}</div>`;
+      }
+      if (id.resolved) {
+        const kind = id.custodial
+          ? "HII-custodial (HII holds the signing key)"
+          : "self-managed (the creator holds the key)";
+        return `<div class="good"><strong>✓ Signer resolves to creator <code>${id.creator_id}</code>.</strong>
+          Key type: ${kind}. Resolved via an IdentityBinding committed at index ${id.binding_index}, signed by the
+          pinned identity root.<br><span class="hint">Proves HII vouched for this key→creator mapping at the
+          attestation's submission time and logged it.</span></div>`;
+      }
+      const why = id.binding_included
+        ? "the binding at that index does not authorize this signing key (or is signed by a non-pinned root)"
+        : "the binding leaf at that index is not committed in the log";
+      return `<div class="err"><strong>✗ Identity not resolved.</strong> ${why}.</div>`;
+    }
+
     btn.addEventListener("click", async () => {
       const leaf = document.getElementById("leaf").value.trim();
       if (!leaf) { output.innerHTML = `<div class="err">Paste a base64 leaf first.</div>`; return; }
       const file = document.getElementById("media").files[0];
       const indexStr = document.getElementById("index").value.trim();
+      const bindingIdxStr = document.getElementById("binding_index").value.trim();
       const origin = document.getElementById("origin").value.trim();
       const vkey = document.getElementById("vkey").value.trim();
+      const idRoot = document.getElementById("idroot").value.trim();
       const baseUrl = document.getElementById("baseurl").value.trim();
 
       output.innerHTML = `<p class="status">Verifying…</p>`;
@@ -205,21 +252,36 @@
         if (result.kind === "attestation") body += renderContent(result.content);
 
         // Log inclusion (async, needs network + the pinned config).
+        let inc = null;
         const wantInclusion = indexStr !== "" && origin && vkey && baseUrl;
         if (wantInclusion) {
           output.innerHTML = body + `<p class="status">Checking log inclusion…</p>`;
-          let inc;
           try {
-            const incJson = await cocVerifyInclusion(leaf, Number(indexStr), baseUrl, origin, vkey);
-            inc = JSON.parse(incJson);
+            inc = JSON.parse(await cocVerifyInclusion(leaf, Number(indexStr), baseUrl, origin, vkey));
           } catch (e) {
             inc = { error: String(e) };
           }
-          raw.textContent = JSON.stringify({ leaf: result, inclusion: inc }, null, 2);
           body += renderInclusion(inc, true);
         } else {
           body += renderInclusion(null, false);
         }
+
+        // Identity resolution (attestations only; needs binding index + identity root).
+        let id = null;
+        const wantIdentity = result.kind === "attestation" && bindingIdxStr !== "" && idRoot && origin && vkey && baseUrl;
+        if (wantIdentity) {
+          output.innerHTML = body + `<p class="status">Resolving creator identity…</p>`;
+          try {
+            id = JSON.parse(await cocVerifyIdentity(leaf, Number(bindingIdxStr), baseUrl, origin, vkey, idRoot));
+          } catch (e) {
+            id = { error: String(e) };
+          }
+          body += renderIdentity(id, true);
+        } else if (result.kind === "attestation") {
+          body += renderIdentity(null, false);
+        }
+
+        raw.textContent = JSON.stringify({ leaf: result, inclusion: inc, identity: id }, null, 2);
         output.innerHTML = body;
       } catch (e) {
         output.innerHTML = `<div class="err"><strong>Error:</strong> ${e}</div>`;
