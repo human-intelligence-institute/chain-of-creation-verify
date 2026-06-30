@@ -6,13 +6,14 @@ third party needs to check a leaf on their own — by reading our open reference
 implementation (`pkg/cocverify`, compiled to WebAssembly in `web/`), porting it,
 or auditing it.
 
-> **Scope of this version.** This spec covers what the offline reference verifier
-> checks today: **leaf parsing, Ed25519 signatures, and content matching** (exact
-> hash + fuzzy digest). It does **not** yet cover **log-inclusion proofs** or
-> **identity resolution** (mapping a signing key to a creator) — those are Phase 2
-> and will extend this spec. A passing content+signature check means "this leaf is
-> well-formed, correctly signed, and your file matches it." It does **not** by
-> itself prove the leaf is published in the transparency log.
+> **Scope of this version.** This spec covers **leaf parsing, Ed25519 signatures,
+> content matching** (exact hash + fuzzy digest), and **log-inclusion proofs**
+> (§8). It does **not** yet cover **identity resolution** (mapping a signing key to
+> a creator) — that remains Phase 2b and will extend this spec. A passing
+> content+signature check means "this leaf is well-formed, correctly signed, and
+> your file matches it"; adding the §8 inclusion check proves the leaf is
+> **committed in the published log** under a checkpoint signed by the log's pinned
+> key.
 
 ## 1. Trust model — what each check is worth
 
@@ -21,8 +22,8 @@ or auditing it.
 | Exact content match | BLAKE3-256 | **Yes, universally** (BLAKE3 has many independent implementations) | **Strong** — a match proves byte-identical media |
 | Signature | Ed25519 | **Yes, universally** | **Strong** — proves the leaf was signed by the holder of `SignerPubKey` |
 | Fuzzy content match | `simhash-text-v1` / `phash-dct-64` (bespoke) | **Only by running our reference** (or a faithful port) | **Advisory** — see below |
-| Log inclusion | RFC6962 Merkle proof | Phase 2 | n/a yet |
-| Identity (key → creator) | Ed25519-signed `IdentityBinding` | Phase 2 | n/a yet |
+| Log inclusion | RFC6962 Merkle proof under a pinned-key checkpoint (§8) | **Yes** — fetch checkpoint + tiles, reconstruct the proof | **Strong** — proves the leaf is committed in the published log |
+| Identity (key → creator) | Ed25519-signed `IdentityBinding` | Phase 2b | n/a yet |
 
 **The fuzzy digest is a similarity index, not a cryptographic commitment.** Because
 the algorithm and its parameters are public, a fuzzy match is *steerable* and must be
@@ -199,7 +200,70 @@ identically — that reformatting-invariance is the point of the fuzzy digest.
 The PNG and JPEG of the same image hash identically (distance 0) despite lossy
 recompression; the different image is far away (`distance(a,b) = popcount(f8f8f8f8f8070605 ⊕ 2d126d926d2d936d)/64`).
 
-## 8. Versioning
+## 8. Log inclusion
+
+The checks above prove a leaf is well-formed, signed, and matches a file. Inclusion
+proves the leaf is **committed in the published log** — that the operator actually
+logged it and cannot later disavow or alter it. The log exposes the c2sp tlog-tiles
+read path; it does **not** serve ready-made proofs, so a verifier reconstructs the
+proof itself from tiles. This keeps verification independent of the operator.
+
+### 8.1 Read path
+
+- `GET /checkpoint` — the signed checkpoint (a C2SP signed note).
+- `GET /tile/{level}/{index}[.p/{w}]` — a Merkle tile (binary).
+- `GET /tile/entries/{index}[.p/{w}]` — an entry bundle (binary).
+
+Responses carry `Access-Control-Allow-Origin: *` so a browser verifier on another
+origin can fetch them.
+
+### 8.2 Checkpoint — pinned-key verification
+
+The checkpoint is a [note](https://pkg.go.dev/golang.org/x/mod/sumdb/note):
+
+```
+<origin>
+<tree size>
+<root hash, base64>
+
+— <origin> <base64 signature>
+[additional log/witness cosignature lines]
+```
+
+A verifier MUST verify the checkpoint signature against a **pinned** `(origin, vkey)`
+that ships with the verifier (published below / baked into the distribution) — **never**
+a key taken from the response. The pinned vkey is the trust anchor; an unverifiable
+checkpoint is a hard failure, never a silent pass. Witness cosignatures, when a witness
+quorum is live, are verified against the published witness policy; until then the log
+is **not yet witnessed** and split-view/equivocation protection is pending — a verifier
+should say so rather than imply it.
+
+### 8.3 Inclusion proof
+
+Given the record's `{leaf, index}` (the index is returned in the submit receipt):
+
+1. Fetch + verify the checkpoint → tree `size` and `root`.
+2. If `index ≥ size`, the leaf is not in this checkpoint — not included.
+3. Compute the RFC6962 inclusion proof node set for `(index, size)` and fetch those
+   nodes from the tiles (the right-edge nodes may be ephemeral and synthesized from
+   partial tiles — standard tlog-tiles proof reconstruction).
+4. The leaf hash is `RFC6962-LeafHash(rawLeaf)` (Tessera's hasher — distinct from the
+   BLAKE3 content/`LeafHash` used to chain provenance events). Verify the proof against
+   `root`.
+
+A verifier reproduces this with the Tessera client (`client.FetchCheckpoint`,
+`client.NewProofBuilder(...).InclusionProof`) over any fetcher, or an equivalent port.
+Reference: `pkg/cocverify/inclusion.go`; the browser export is
+`cocVerifyInclusion(leafB64, index, readBaseURL, origin, vkey)`.
+
+### 8.4 What inclusion does and does not prove
+
+A successful check proves the leaf is committed at `index` in a log of `size` entries
+under a checkpoint signed by the pinned key, **as of the checkpoint you fetched**. It
+does **not** prove the log never forked or rewound over time — that needs consistency
+proofs between checkpoints over time (a later revision) and live witnessing.
+
+## 9. Versioning
 
 This spec is **v1**, matching `AlgorithmID` values `simhash-text-v1` and
 `phash-dct-64`. Any change to tokenization, hashing, bit ordering, thresholds, or the

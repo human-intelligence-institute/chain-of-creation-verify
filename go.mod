@@ -8,6 +8,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.17
 	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.57.4
 	github.com/aws/aws-sdk-go-v2/service/kms v1.52.0
+	github.com/go-sql-driver/mysql v1.10.0
 	github.com/transparency-dev/merkle v0.0.2
 	github.com/transparency-dev/tessera v1.0.2
 	github.com/zeebo/blake3 v0.2.4
@@ -36,7 +37,6 @@ require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
-	github.com/go-sql-driver/mysql v1.10.0 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
 	github.com/klauspost/cpuid/v2 v2.0.12 // indirect

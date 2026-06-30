@@ -8,8 +8,9 @@
     body { font: 15px/1.5 system-ui, sans-serif; max-width: 760px; margin: 2rem auto; padding: 0 1rem; color: #1a1a1a; }
     h1 { margin-bottom: 0.25rem; }
     label { display: block; font-weight: 600; margin: 1rem 0 0.25rem; }
-    textarea, input[type=file] { width: 100%; box-sizing: border-box; }
-    textarea { font-family: ui-monospace, monospace; }
+    textarea, input[type=file], input[type=text], input[type=number] { width: 100%; box-sizing: border-box; }
+    textarea, input[type=text], input[type=number] { font-family: ui-monospace, monospace; }
+    input[type=number] { max-width: 12rem; }
     button { margin-top: 1rem; padding: 0.5rem 1rem; font-size: 1rem; cursor: pointer; }
     button:disabled { cursor: default; opacity: 0.5; }
     .status { color: #666; }
@@ -22,22 +23,38 @@
     .bad { color: #b00020; font-weight: 600; }
     .strong { color: #137333; font-weight: 600; }
     .advisory { color: #8a5a00; font-weight: 600; }
+    .good { border-left: 4px solid #137333; background: #eaf5ec; padding: 0.6rem 0.9rem; margin-top: 1rem; font-size: 0.92em; }
     .banner { border-left: 4px solid #8a5a00; background: #fff8e6; padding: 0.6rem 0.9rem; margin-top: 1rem; font-size: 0.92em; }
     .err { border-left: 4px solid #b00020; background: #fdecef; padding: 0.6rem 0.9rem; margin-top: 1rem; }
     details { margin-top: 1rem; } summary { cursor: pointer; color: #666; }
     pre { background: #f5f5f5; padding: 1rem; overflow: auto; white-space: pre-wrap; word-break: break-all; }
+    fieldset { margin-top: 1rem; border: 1px solid #ddd; border-radius: 8px; }
+    legend { color: #555; font-size: 0.9em; padding: 0 0.4rem; }
   </style>
 </head>
 <body>
   <h1>chain-of-creation verifier</h1>
-  <p class="hint">Offline reference verifier — runs entirely in your browser (WebAssembly). Nothing is uploaded.</p>
+  <p class="hint">Offline reference verifier — runs entirely in your browser (WebAssembly). Your media file is never uploaded; log artifacts (checkpoint + tiles) are fetched read-only to prove inclusion.</p>
   <p class="status" id="status">Loading WebAssembly…</p>
 
-  <label for="leaf">Leaf (base64)<span class="hint"> — the canonical leaf bytes you obtained from the log record</span></label>
+  <label for="leaf">Leaf (base64)<span class="hint"> — the canonical leaf bytes from the log record</span></label>
   <textarea id="leaf" rows="4" placeholder="base64-encoded canonical leaf bytes"></textarea>
 
   <label for="media">Media file<span class="hint"> — optional; the work you want to check against this attestation</span></label>
   <input type="file" id="media" />
+
+  <label for="index">Log index<span class="hint"> — optional; from the submit receipt. Provide it to check log inclusion.</span></label>
+  <input type="number" id="index" min="0" step="1" placeholder="e.g. 0" />
+
+  <fieldset>
+    <legend>Log configuration (the pinned trust anchor — part of this verifier, not taken from the server)</legend>
+    <label for="origin">Origin<span class="hint"> — the log's checkpoint name</span></label>
+    <input type="text" id="origin" placeholder="e.g. chain-of-creation" />
+    <label for="vkey">Checkpoint public key (note vkey)</label>
+    <input type="text" id="vkey" placeholder="origin+xxxxxxxx+Base64Key" />
+    <label for="baseurl">Read base URL</label>
+    <input type="text" id="baseurl" placeholder="https://chain.humancreator.com/" />
+  </fieldset>
 
   <button id="verify" disabled>Verify</button>
 
@@ -51,21 +68,31 @@
   <!-- wasm_exec.js is provided by the Go toolchain; build.sh copies it here. -->
   <script src="wasm_exec.js"></script>
   <script>
+    // CONFIG: the pinned trust anchor. In a deployed verifier these are baked to
+    // the target log's published values; the fields above let you override for
+    // local testing. The verifier ALWAYS verifies the checkpoint against this key
+    // — never the key the server presents.
+    const CONFIG = { origin: "", vkey: "", baseUrl: "" };
+
     const go = new Go();
     const status = document.getElementById("status");
     const btn = document.getElementById("verify");
     const output = document.getElementById("output");
     const raw = document.getElementById("raw");
 
+    // Prefill log-config fields from CONFIG.
+    document.getElementById("origin").value = CONFIG.origin;
+    document.getElementById("vkey").value = CONFIG.vkey;
+    document.getElementById("baseurl").value = CONFIG.baseUrl;
+
     WebAssembly.instantiateStreaming(fetch("cocverify.wasm"), go.importObject)
       .then((res) => {
         go.run(res.instance);
-        status.textContent = "Ready. Paste a base64 leaf (and optionally choose a media file), then click Verify.";
+        status.textContent = "Ready. Paste a base64 leaf, optionally choose a media file and log index, then Verify.";
         btn.disabled = false;
       })
       .catch((err) => { status.textContent = "Failed to load WebAssembly: " + err; });
 
-    // Read a File as standard base64 without blowing the call stack on large files.
     function fileToBase64(file) {
       return new Promise((resolve, reject) => {
         const r = new FileReader();
@@ -112,11 +139,7 @@
       return `<div class="card">${html}</div>`;
     }
 
-    function render(result) {
-      if (result.error) {
-        output.innerHTML = `<div class="err"><strong>Error:</strong> ${result.error}</div>`;
-        return;
-      }
+    function renderHead(result) {
       const sig = result.signature_valid
         ? `<span class="ok">✓ valid</span>` : `<span class="bad">✗ invalid</span>`;
       let head = row("Leaf kind", result.kind);
@@ -128,33 +151,76 @@
       } else if (result.kind === "identity_binding") {
         head += row("Creator ID", result.creator_id || "—");
       }
+      return `<div class="card">${head}</div>`;
+    }
 
-      let body = `<div class="card">${head}</div>`;
-      if (result.kind === "attestation") body += renderContent(result.content);
-
-      // Honest scope banner — always shown. This verifier does NOT check
-      // log inclusion yet (Phase 2), so a green signature is not proof of
-      // publication in the transparency log.
-      body += `<div class="banner"><strong>Not yet checked:</strong> whether this record is published in the
-        transparency log. This verifier confirms the signature and content only — it does not (yet) fetch a
-        log-inclusion proof. Log-inclusion + identity resolution are coming in a later version.</div>`;
-
-      output.innerHTML = body;
+    // Render the log-inclusion section. `inc` is the InclusionResult JSON, or null
+    // when inclusion was not attempted, or an {error} object on failure.
+    function renderInclusion(inc, attempted) {
+      if (!attempted) {
+        return `<div class="banner"><strong>Log inclusion not checked.</strong> Provide a log index and the log
+          configuration above to confirm this record is actually published in the transparency log.</div>`;
+      }
+      if (inc && inc.error) {
+        return `<div class="err"><strong>Inclusion check failed:</strong> ${inc.error}<br>
+          <span class="hint">A failure here means the checkpoint could not be verified against the pinned key,
+          or the log could not be reached — not that the record is necessarily absent.</span></div>`;
+      }
+      if (inc.included) {
+        const witness = inc.cosignatures > 0
+          ? `${inc.cosignatures} cosignature(s) present (not verified by this build)`
+          : `⚠ not yet witnessed — split-view protection is pending`;
+        return `<div class="good"><strong>✓ Included in the transparency log.</strong>
+          Leaf is committed at index ${inc.index} of a ${inc.tree_size}-entry tree, under a checkpoint signed by
+          <code>${inc.origin}</code>.<br><span class="hint">Witness status: ${witness}.</span></div>`;
+      }
+      return `<div class="err"><strong>✗ NOT included.</strong> The leaf is not committed at index ${inc.index}
+        in the current ${inc.tree_size}-entry log (checkpoint signed by <code>${inc.origin}</code>). Treat this
+        record as unproven.</div>`;
     }
 
     btn.addEventListener("click", async () => {
       const leaf = document.getElementById("leaf").value.trim();
       if (!leaf) { output.innerHTML = `<div class="err">Paste a base64 leaf first.</div>`; return; }
       const file = document.getElementById("media").files[0];
+      const indexStr = document.getElementById("index").value.trim();
+      const origin = document.getElementById("origin").value.trim();
+      const vkey = document.getElementById("vkey").value.trim();
+      const baseUrl = document.getElementById("baseurl").value.trim();
+
       output.innerHTML = `<p class="status">Verifying…</p>`;
       try {
         const mediaB64 = file ? await fileToBase64(file) : null;
-        // cocVerifyLeaf is exported by the Go WebAssembly module.
         const json = mediaB64 ? cocVerifyLeaf(leaf, mediaB64) : cocVerifyLeaf(leaf);
         let result;
         try { result = JSON.parse(json); } catch { result = { error: json }; }
         raw.textContent = JSON.stringify(result, null, 2);
-        render(result);
+
+        if (result.error) {
+          output.innerHTML = `<div class="err"><strong>Error:</strong> ${result.error}</div>`;
+          return;
+        }
+
+        let body = renderHead(result);
+        if (result.kind === "attestation") body += renderContent(result.content);
+
+        // Log inclusion (async, needs network + the pinned config).
+        const wantInclusion = indexStr !== "" && origin && vkey && baseUrl;
+        if (wantInclusion) {
+          output.innerHTML = body + `<p class="status">Checking log inclusion…</p>`;
+          let inc;
+          try {
+            const incJson = await cocVerifyInclusion(leaf, Number(indexStr), baseUrl, origin, vkey);
+            inc = JSON.parse(incJson);
+          } catch (e) {
+            inc = { error: String(e) };
+          }
+          raw.textContent = JSON.stringify({ leaf: result, inclusion: inc }, null, 2);
+          body += renderInclusion(inc, true);
+        } else {
+          body += renderInclusion(null, false);
+        }
+        output.innerHTML = body;
       } catch (e) {
         output.innerHTML = `<div class="err"><strong>Error:</strong> ${e}</div>`;
       }
