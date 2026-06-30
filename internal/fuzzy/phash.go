@@ -18,6 +18,11 @@ import (
 // thresholded against the median of the low-frequency 8x8 block). It is robust
 // to recompression, rescaling, and mild adjustments because those preserve the
 // low-frequency structure the hash captures.
+//
+// This algorithm is a PUBLISHED CONTRACT: its byte-exact behavior is specified in
+// docs/verification-spec.md (id "phash-dct-64") and frozen by golden vectors in
+// golden_test.go. Any change to resizing, the DCT, the median rule, bit order, or
+// threshold is a breaking change — bump the algorithm id, do not edit in place.
 type phashImage struct{}
 
 // NewPHashImage returns the image fuzzy hasher (algorithm id "phash-dct-64").

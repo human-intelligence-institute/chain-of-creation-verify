@@ -5,28 +5,48 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>chain-of-creation — verifier</title>
   <style>
-    body { font: 15px/1.5 system-ui, sans-serif; max-width: 760px; margin: 2rem auto; padding: 0 1rem; }
+    body { font: 15px/1.5 system-ui, sans-serif; max-width: 760px; margin: 2rem auto; padding: 0 1rem; color: #1a1a1a; }
+    h1 { margin-bottom: 0.25rem; }
     label { display: block; font-weight: 600; margin: 1rem 0 0.25rem; }
-    textarea { width: 100%; box-sizing: border-box; font-family: ui-monospace, monospace; }
-    button { margin-top: 1rem; padding: 0.5rem 1rem; font-size: 1rem; }
-    pre { background: #f5f5f5; padding: 1rem; overflow: auto; white-space: pre-wrap; word-break: break-all; }
+    textarea, input[type=file] { width: 100%; box-sizing: border-box; }
+    textarea { font-family: ui-monospace, monospace; }
+    button { margin-top: 1rem; padding: 0.5rem 1rem; font-size: 1rem; cursor: pointer; }
+    button:disabled { cursor: default; opacity: 0.5; }
     .status { color: #666; }
+    .hint { color: #666; font-weight: 400; font-size: 0.85em; }
+    .card { border: 1px solid #ddd; border-radius: 8px; padding: 1rem 1.25rem; margin-top: 1rem; }
+    .row { display: flex; gap: 0.5rem; padding: 0.2rem 0; }
+    .row .k { width: 9rem; color: #555; flex: none; }
+    .row .v { font-family: ui-monospace, monospace; word-break: break-all; }
+    .ok { color: #137333; font-weight: 600; }
+    .bad { color: #b00020; font-weight: 600; }
+    .strong { color: #137333; font-weight: 600; }
+    .advisory { color: #8a5a00; font-weight: 600; }
+    .banner { border-left: 4px solid #8a5a00; background: #fff8e6; padding: 0.6rem 0.9rem; margin-top: 1rem; font-size: 0.92em; }
+    .err { border-left: 4px solid #b00020; background: #fdecef; padding: 0.6rem 0.9rem; margin-top: 1rem; }
+    details { margin-top: 1rem; } summary { cursor: pointer; color: #666; }
+    pre { background: #f5f5f5; padding: 1rem; overflow: auto; white-space: pre-wrap; word-break: break-all; }
   </style>
 </head>
 <body>
   <h1>chain-of-creation verifier</h1>
+  <p class="hint">Offline reference verifier — runs entirely in your browser (WebAssembly). Nothing is uploaded.</p>
   <p class="status" id="status">Loading WebAssembly…</p>
 
-  <label for="leaf">Leaf (base64)</label>
+  <label for="leaf">Leaf (base64)<span class="hint"> — the canonical leaf bytes you obtained from the log record</span></label>
   <textarea id="leaf" rows="4" placeholder="base64-encoded canonical leaf bytes"></textarea>
 
-  <label for="media">Media (base64, optional — to content-match an attestation)</label>
-  <textarea id="media" rows="4" placeholder="base64-encoded media file"></textarea>
+  <label for="media">Media file<span class="hint"> — optional; the work you want to check against this attestation</span></label>
+  <input type="file" id="media" />
 
   <button id="verify" disabled>Verify</button>
 
-  <h2>Result</h2>
-  <pre id="result">—</pre>
+  <div id="output"></div>
+
+  <details>
+    <summary>Raw result (JSON)</summary>
+    <pre id="raw">—</pre>
+  </details>
 
   <!-- wasm_exec.js is provided by the Go toolchain; build.sh copies it here. -->
   <script src="wasm_exec.js"></script>
@@ -34,25 +54,109 @@
     const go = new Go();
     const status = document.getElementById("status");
     const btn = document.getElementById("verify");
+    const output = document.getElementById("output");
+    const raw = document.getElementById("raw");
 
     WebAssembly.instantiateStreaming(fetch("cocverify.wasm"), go.importObject)
       .then((res) => {
         go.run(res.instance);
-        status.textContent = "Ready. Paste a base64 leaf and click Verify.";
+        status.textContent = "Ready. Paste a base64 leaf (and optionally choose a media file), then click Verify.";
         btn.disabled = false;
       })
       .catch((err) => { status.textContent = "Failed to load WebAssembly: " + err; });
 
-    btn.addEventListener("click", () => {
+    // Read a File as standard base64 without blowing the call stack on large files.
+    function fileToBase64(file) {
+      return new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onerror = () => reject(r.error);
+        r.onload = () => {
+          const bytes = new Uint8Array(r.result);
+          let binary = "";
+          const chunk = 0x8000;
+          for (let i = 0; i < bytes.length; i += chunk) {
+            binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+          }
+          resolve(btoa(binary));
+        };
+        r.readAsArrayBuffer(file);
+      });
+    }
+
+    function row(k, v, cls) {
+      return `<div class="row"><div class="k">${k}</div><div class="v ${cls || ""}">${v}</div></div>`;
+    }
+
+    function renderContent(c) {
+      if (!c) {
+        return `<div class="banner">No media file provided — content was not checked. Choose the work file to test exact and fuzzy matches.</div>`;
+      }
+      let html = row("Algorithm", c.algorithm_id || "—");
+      if (c.exact_match) {
+        html += row("Exact match", "✓ byte-identical to the certified media", "strong");
+        html += `<div class="hint">Cryptographically strong (BLAKE3-256). This file IS the certified bytes.</div>`;
+      } else {
+        html += row("Exact match", "✗ not byte-identical", "");
+        if (c.fuzzy_checked) {
+          const within = c.fuzzy_match;
+          html += row("Fuzzy distance",
+            `${c.fuzzy_distance.toFixed(4)} (threshold ${c.fuzzy_threshold.toFixed(4)}) — ${within ? "within" : "above"} threshold`,
+            "advisory");
+          html += `<div class="hint">Advisory similarity, not proof. ${within
+            ? "This file is <em>consistent with</em> the certified work (e.g. a reformatted or re-encoded copy) — it does not prove it is the same work."
+            : "This file does not closely match; a fuzzy non-match does not prove it is a different work."}</div>`;
+        } else if (c.note) {
+          html += row("Fuzzy", c.note, "");
+        }
+      }
+      return `<div class="card">${html}</div>`;
+    }
+
+    function render(result) {
+      if (result.error) {
+        output.innerHTML = `<div class="err"><strong>Error:</strong> ${result.error}</div>`;
+        return;
+      }
+      const sig = result.signature_valid
+        ? `<span class="ok">✓ valid</span>` : `<span class="bad">✗ invalid</span>`;
+      let head = row("Leaf kind", result.kind);
+      head += row("Signature", sig);
+      head += row("Leaf hash", result.leaf_hash);
+      if (result.kind === "attestation") {
+        head += row("Work ID", result.work_id || "—");
+        head += row("Event", `seq ${result.event_seq || 0} · ${result.event_type || "—"}`);
+      } else if (result.kind === "identity_binding") {
+        head += row("Creator ID", result.creator_id || "—");
+      }
+
+      let body = `<div class="card">${head}</div>`;
+      if (result.kind === "attestation") body += renderContent(result.content);
+
+      // Honest scope banner — always shown. This verifier does NOT check
+      // log inclusion yet (Phase 2), so a green signature is not proof of
+      // publication in the transparency log.
+      body += `<div class="banner"><strong>Not yet checked:</strong> whether this record is published in the
+        transparency log. This verifier confirms the signature and content only — it does not (yet) fetch a
+        log-inclusion proof. Log-inclusion + identity resolution are coming in a later version.</div>`;
+
+      output.innerHTML = body;
+    }
+
+    btn.addEventListener("click", async () => {
       const leaf = document.getElementById("leaf").value.trim();
-      const media = document.getElementById("media").value.trim();
-      // cocVerifyLeaf is exported by the Go WebAssembly module.
-      const json = media ? cocVerifyLeaf(leaf, media) : cocVerifyLeaf(leaf);
+      if (!leaf) { output.innerHTML = `<div class="err">Paste a base64 leaf first.</div>`; return; }
+      const file = document.getElementById("media").files[0];
+      output.innerHTML = `<p class="status">Verifying…</p>`;
       try {
-        document.getElementById("result").textContent =
-          JSON.stringify(JSON.parse(json), null, 2);
-      } catch {
-        document.getElementById("result").textContent = json;
+        const mediaB64 = file ? await fileToBase64(file) : null;
+        // cocVerifyLeaf is exported by the Go WebAssembly module.
+        const json = mediaB64 ? cocVerifyLeaf(leaf, mediaB64) : cocVerifyLeaf(leaf);
+        let result;
+        try { result = JSON.parse(json); } catch { result = { error: json }; }
+        raw.textContent = JSON.stringify(result, null, 2);
+        render(result);
+      } catch (e) {
+        output.innerHTML = `<div class="err"><strong>Error:</strong> ${e}</div>`;
       }
     });
   </script>

@@ -11,6 +11,11 @@ import (
 // simHashText is a 64-bit SimHash over frequency-weighted word tokens. It is
 // robust to whitespace, casing, and small edits: changing a few tokens flips
 // only a few fingerprint bits, so similar documents stay close in Hamming space.
+//
+// This algorithm is a PUBLISHED CONTRACT: its byte-exact behavior is specified in
+// docs/verification-spec.md (id "simhash-text-v1") and frozen by golden vectors in
+// golden_test.go. Any change to tokenization, hashing, bit order, or threshold is a
+// breaking change — bump the algorithm id, do not edit in place.
 type simHashText struct{}
 
 // NewSimHashText returns the text fuzzy hasher (algorithm id "simhash-text-v1").
