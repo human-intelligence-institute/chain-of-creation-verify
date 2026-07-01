@@ -6,6 +6,7 @@
 package verify
 
 import (
+	"crypto/sha256"
 	"errors"
 	"time"
 
@@ -73,11 +74,28 @@ func VerifyEvent(att *leaf.Attestation, res *identity.Resolver) (SignatureResult
 	return sig, id
 }
 
+// exactMatch recomputes the exact hash of media under the algorithm named by
+// att.ExactAlg and compares it to att.ExactHash. HII leaves record "sha256" over
+// the raw certified file bytes; older/other leaves use BLAKE3 (named "blake3" or
+// left empty). An unknown exact algorithm cannot be verified, so it is not a
+// match. For file-based media (e.g. a .docx) `media` must be the RAW file bytes;
+// the fuzzy path takes extracted text separately (see the callers).
+func exactMatch(media []byte, att *leaf.Attestation) bool {
+	switch att.ExactAlg {
+	case "sha256":
+		return leaf.Hash(sha256.Sum256(media)) == att.ExactHash
+	case "blake3", "":
+		return leaf.HashContent(media) == att.ExactHash
+	default:
+		return false
+	}
+}
+
 // MatchMedia recomputes the exact hash and (when the algorithm supports it) the
 // fuzzy distance of media against an attestation.
 func MatchMedia(media []byte, att *leaf.Attestation, reg *fuzzy.Registry) ContentMatch {
 	cm := ContentMatch{
-		ExactMatch:  leaf.HashContent(media) == att.ExactHash,
+		ExactMatch:  exactMatch(media, att),
 		AlgorithmID: att.AlgorithmID,
 	}
 	v, err := reg.Verifier(att.AlgorithmID)

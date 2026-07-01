@@ -12,6 +12,7 @@ package fuzzy
 
 import (
 	"encoding/hex"
+	"encoding/json"
 	"os"
 	"testing"
 )
@@ -45,6 +46,42 @@ func TestGoldenSimHashText(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			if got := mustDigest(t, v, []byte(c.text)); got != c.want {
 				t.Fatalf("simhash-text-v1(%q) = %s, want %s", c.text, got, c.want)
+			}
+		})
+	}
+}
+
+// TestGoldenSimHash64 pins simhash64-v1 to the shared vector file that every
+// client repo (customer-app, word-certifier, gdoc-certifier) also reproduces.
+// Reading the same spec/simhash64-vectors.json — rather than hardcoding a second
+// copy here — makes drift between the spec and this implementation impossible.
+func TestGoldenSimHash64(t *testing.T) {
+	raw, err := os.ReadFile("../../spec/simhash64-vectors.json")
+	if err != nil {
+		t.Fatalf("read shared vectors: %v", err)
+	}
+	var spec struct {
+		AlgorithmID string `json:"algorithm_id"`
+		Vectors     []struct {
+			Name   string `json:"name"`
+			Input  string `json:"input"`
+			Digest string `json:"digest"`
+		} `json:"vectors"`
+	}
+	if err := json.Unmarshal(raw, &spec); err != nil {
+		t.Fatalf("parse shared vectors: %v", err)
+	}
+	v := NewSimHash64()
+	if v.ID() != spec.AlgorithmID {
+		t.Fatalf("registry id %q != shared vectors algorithm_id %q", v.ID(), spec.AlgorithmID)
+	}
+	if len(spec.Vectors) == 0 {
+		t.Fatal("no vectors in spec/simhash64-vectors.json")
+	}
+	for _, c := range spec.Vectors {
+		t.Run(c.Name, func(t *testing.T) {
+			if got := mustDigest(t, v, []byte(c.Input)); got != c.Digest {
+				t.Fatalf("simhash64-v1(%q) = %s, want %s", c.Input, got, c.Digest)
 			}
 		})
 	}

@@ -19,7 +19,7 @@ func TestBuildText(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	if att.AlgorithmID != "simhash-text-v1" {
+	if att.AlgorithmID != "simhash64-v1" {
 		t.Fatalf("AlgorithmID = %q", att.AlgorithmID)
 	}
 	if att.ExactHash != leaf.HashContent(media) {

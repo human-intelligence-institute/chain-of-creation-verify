@@ -98,11 +98,14 @@ func (r *Registry) DigesterForMedia(mt leaf.MediaType) (Digester, bool) {
 	return r.byID[id], true
 }
 
-// Default returns a registry with the algorithms shipped today: SimHash for
-// text, and pHash-DCT for photo and digital art.
+// Default returns a registry with the algorithms shipped today: the canonical
+// simhash64-v1 (the id HII certifiers record) as the text default, plus the
+// legacy simhash-text-v1 kept resolvable for any older text leaves, and
+// pHash-DCT for photo and digital art.
 func Default() *Registry {
 	r := NewRegistry()
-	r.Register(NewSimHashText(), leaf.MediaText)
+	r.Register(NewSimHash64(), leaf.MediaText)
+	r.Register(NewSimHashText())
 	r.Register(NewPHashImage(), leaf.MediaPhoto, leaf.MediaDigitalArt)
 	return r
 }

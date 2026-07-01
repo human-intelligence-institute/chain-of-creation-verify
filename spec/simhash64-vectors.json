@@ -1,0 +1,16 @@
+{
+  "_comment": "Canonical golden vectors for the simhash64-v1 content fingerprint. SOURCE OF TRUTH for every implementation: coc (internal/fuzzy), customer-app, word-certifier, gdoc-certifier. Each repo's test suite MUST reproduce these digests byte-for-byte; a drift fails CI. See docs/verification-spec.md §6.3. Do not edit a digest in place — that is a breaking change requiring a new algorithm_id.",
+  "algorithm_id": "simhash64-v1",
+  "feature_hash": "sha256-truncated-64-big-endian",
+  "shingle": 3,
+  "threshold_bits": 9,
+  "digest_bits": 64,
+  "vectors": [
+    { "name": "pangram", "input": "The quick brown fox jumps over the lazy dog.", "digest": "e7e097a95960e95f" },
+    { "name": "reformat", "input": "the   QUICK brown fox\tjumps over the lazy dog", "digest": "e7e097a95960e95f" },
+    { "name": "tagline", "input": "Provenance you can verify.", "digest": "f560282f20b80090" },
+    { "name": "unicode", "input": "café déjà vu 🎨 naïve façade", "digest": "b1ea06b8a80badd3" },
+    { "name": "sub-shingle", "input": "two words", "digest": "a03f1d611645eb53" },
+    { "name": "empty", "input": "", "digest": "0000000000000000" }
+  ]
+}

@@ -20,14 +20,17 @@ func (digesterOnly) Digest(b []byte) ([]byte, error) { return []byte{0}, nil }
 
 func TestDefaultRegistry(t *testing.T) {
 	r := Default()
+	if _, ok := r.Get("simhash64-v1"); !ok {
+		t.Fatal("simhash64-v1 not registered")
+	}
 	if _, ok := r.Get("simhash-text-v1"); !ok {
-		t.Fatal("simhash-text-v1 not registered")
+		t.Fatal("simhash-text-v1 (legacy) should stay resolvable")
 	}
 	if _, ok := r.Get("phash-dct-64"); !ok {
 		t.Fatal("phash-dct-64 not registered")
 	}
-	if d, ok := r.DigesterForMedia(leaf.MediaText); !ok || d.ID() != "simhash-text-v1" {
-		t.Fatal("text default not wired")
+	if d, ok := r.DigesterForMedia(leaf.MediaText); !ok || d.ID() != "simhash64-v1" {
+		t.Fatal("text default should be the canonical simhash64-v1")
 	}
 	if d, ok := r.DigesterForMedia(leaf.MediaDigitalArt); !ok || d.ID() != "phash-dct-64" {
 		t.Fatal("digital-art should map to pHash")

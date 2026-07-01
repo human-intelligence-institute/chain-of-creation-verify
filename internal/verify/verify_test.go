@@ -3,6 +3,7 @@ package verify
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
 	"testing"
 	"time"
 
@@ -12,6 +13,30 @@ import (
 	"github.com/human-intelligence-institute/chain-of-creation/internal/provenance"
 	"github.com/transparency-dev/merkle/rfc6962"
 )
+
+// hiiAttestation builds an HII-style leaf: the canonical simhash64-v1 fuzzy digest
+// over extracted text, and an exact hash that is SHA-256 over the raw file bytes
+// (ExactAlg "sha256"). For a plain-text work rawBytes == text.
+func hiiAttestation(t *testing.T, rawBytes, text []byte, priv ed25519.PrivateKey) *leaf.Attestation {
+	t.Helper()
+	fd, err := fuzzy.NewSimHash64().Digest(text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &leaf.Attestation{
+		SchemaVersion: 1,
+		WorkID:        [16]byte{9},
+		EventType:     leaf.EventPublish,
+		MediaType:     leaf.MediaText,
+		AlgorithmID:   "simhash64-v1",
+		FuzzyDigest:   fd,
+		ExactHash:     leaf.Hash(sha256.Sum256(rawBytes)),
+		ExactAlg:      "sha256",
+		SubmittedAt:   uint64(time.Now().UnixMilli()),
+	}
+	a.Sign(priv)
+	return a
+}
 
 // textAttestation builds a signed attestation describing the given media using
 // the default text hasher, with ExactHash and FuzzyDigest populated.
@@ -105,6 +130,74 @@ func TestMatchMediaUnsupportedAlgorithm(t *testing.T) {
 	}
 	if cm.Note == "" {
 		t.Fatal("expected an explanatory note")
+	}
+}
+
+// TestMatchMediaHIILeaf is the headline case: an HII leaf (sha256 exact +
+// simhash64-v1 fuzzy) verifies against the identical plain-text bytes. Before the
+// exact-dispatch fix this was structurally impossible (BLAKE3 vs sha256) and the
+// fuzzy path returned "unknown algorithm: simhash64-v1".
+func TestMatchMediaHIILeaf(t *testing.T) {
+	_, priv, _ := ed25519.GenerateKey(rand.Reader)
+	media := []byte("the certified written work, in plain text")
+	att := hiiAttestation(t, media, media, priv)
+
+	cm := MatchMedia(media, att, fuzzy.Default())
+	if !cm.ExactMatch {
+		t.Fatal("sha256 exact hash should match the identical raw bytes")
+	}
+	if !cm.FuzzyChecked || !cm.FuzzyMatch || cm.FuzzyDistance != 0 {
+		t.Fatalf("simhash64-v1 fuzzy should match at distance 0: %+v", cm)
+	}
+	if cm.Note != "" {
+		t.Fatalf("no note expected on a clean match, got %q", cm.Note)
+	}
+}
+
+// TestMatchMediaHIIEditedCopy: a lightly edited copy no longer matches exactly,
+// but simhash64-v1 still runs and reports a small nonzero distance (graded, not
+// a silent skip).
+func TestMatchMediaHIIEditedCopy(t *testing.T) {
+	_, priv, _ := ed25519.GenerateKey(rand.Reader)
+	original := []byte("the certified written work has a distinctive opening sentence and several more clauses to fingerprint")
+	att := hiiAttestation(t, original, original, priv)
+
+	edited := append(append([]byte{}, original...), []byte(" plus one more clause")...)
+	cm := MatchMedia(edited, att, fuzzy.Default())
+	if cm.ExactMatch {
+		t.Fatal("an edited copy must not exact-match")
+	}
+	if !cm.FuzzyChecked {
+		t.Fatalf("simhash64-v1 must be fuzzy-checked, got note %q", cm.Note)
+	}
+	if cm.FuzzyDistance <= 0 {
+		t.Fatalf("edited copy should have a nonzero fuzzy distance: %+v", cm)
+	}
+}
+
+// TestExactMatchBlake3Explicit is the regression guard: changing MatchMedia to
+// dispatch on ExactAlg must not break existing non-HII leaves that use BLAKE3
+// (whether ExactAlg is "blake3" or empty).
+func TestExactMatchBlake3Explicit(t *testing.T) {
+	media := []byte("a blake3 exact-alg leaf")
+	for _, alg := range []string{"blake3", ""} {
+		a := &leaf.Attestation{ExactHash: leaf.HashContent(media), ExactAlg: alg}
+		if !exactMatch(media, a) {
+			t.Fatalf("ExactAlg=%q: identical bytes must match", alg)
+		}
+		if exactMatch([]byte("different bytes"), a) {
+			t.Fatalf("ExactAlg=%q: different bytes must not match", alg)
+		}
+	}
+}
+
+// TestExactMatchUnknownAlg: an exact-hash algorithm the verifier doesn't know is
+// not a match, even if some hash of the bytes happens to be stored.
+func TestExactMatchUnknownAlg(t *testing.T) {
+	media := []byte("x")
+	a := &leaf.Attestation{ExactHash: leaf.HashContent(media), ExactAlg: "md5"}
+	if exactMatch(media, a) {
+		t.Fatal("unknown exact-alg must not verify as a match")
 	}
 }
 

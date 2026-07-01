@@ -13,6 +13,7 @@ require (
 	github.com/transparency-dev/tessera v1.0.2
 	github.com/zeebo/blake3 v0.2.4
 	golang.org/x/mod v0.33.0
+	golang.org/x/text v0.34.0
 )
 
 require (

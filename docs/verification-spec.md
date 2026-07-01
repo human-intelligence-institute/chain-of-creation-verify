@@ -18,9 +18,9 @@ or auditing it.
 
 | Check | Primitive | Reproducible by a third party? | Strength |
 |-------|-----------|--------------------------------|----------|
-| Exact content match | BLAKE3-256 | **Yes, universally** (BLAKE3 has many independent implementations) | **Strong** — a match proves byte-identical media |
+| Exact content match | BLAKE3-256 or SHA-256 (named by `ExactAlg`) | **Yes, universally** (both have many independent implementations) | **Strong** — a match proves byte-identical media |
 | Signature | Ed25519 | **Yes, universally** | **Strong** — proves the leaf was signed by the holder of `SignerPubKey` |
-| Fuzzy content match | `simhash-text-v1` / `phash-dct-64` (bespoke) | **Only by running our reference** (or a faithful port) | **Advisory** — see below |
+| Fuzzy content match | `simhash64-v1` (SHA-256 features) / `phash-dct-64` | **Yes** for `simhash64-v1` — SHA-256 has one definition in every language; pHash only by running our reference | **Advisory** — see below |
 | Log inclusion | RFC6962 Merkle proof under a pinned-key checkpoint (§8) | **Yes** — fetch checkpoint + tiles, reconstruct the proof | **Strong** — proves the leaf is committed in the published log |
 | Identity (key → creator) | Ed25519-signed `IdentityBinding`, proven included (§9) | **Yes** — verify the binding named by the receipt | **Strong** (for HII's vouch) — proves HII bound the key to the creator and logged it |
 
@@ -65,13 +65,14 @@ Provenance event for a work. Marshaled field order (`internal/leaf/attestation.g
 | 7 | MediaType | `var` (UTF-8) | e.g. `text`/`photo`/`digital-art` |
 | 8 | AlgorithmID | `var` (UTF-8) | fuzzy algorithm id (= version handle) |
 | 9 | FuzzyDigest | `var` | opaque, algorithm-specific |
-| 10 | ExactHash | `fixed(32)` | BLAKE3-256 of the exact media bytes |
-| 11 | SignerPubKey | `fixed(32)` | Ed25519 public key |
-| 12 | Signature | `fixed(64)` | Ed25519, over the signing payload (§4) |
-| 13 | SubmittedAt | `u64` | unix milliseconds |
-| 14 | ToolTrace | `var` | optional appendix |
+| 10 | ExactHash | `fixed(32)` | exact hash of the media bytes; the algorithm is named by `ExactAlg` (§5) |
+| 11 | ExactAlg | `var` (UTF-8) | exact-hash algorithm id: `blake3` (default) or `sha256`; empty ⇒ `blake3` |
+| 12 | SignerPubKey | `fixed(32)` | Ed25519 public key |
+| 13 | Signature | `fixed(64)` | Ed25519, over the signing payload (§4) |
+| 14 | SubmittedAt | `u64` | unix milliseconds |
+| 15 | ToolTrace | `var` | optional appendix |
 
-**LeafHash** = BLAKE3-256 over the full marshaled leaf (all 14 fields). A later
+**LeafHash** = BLAKE3-256 over the full marshaled leaf (all 15 fields). A later
 event references this value in field 5.
 
 ### 3.2 IdentityBinding (kind = 2)
@@ -98,7 +99,7 @@ distinct from the marshaled leaf — it omits the signature itself and commits t
 **Attestation signing payload** (domain `coc-attestation-v1`), in order:
 `domain (var)`, `SchemaVersion (u32)`, `WorkID (fixed16)`, `EventSeq (u64)`,
 `PrevEventHash (u8 flag + fixed32?)`, `EventType (var)`, `MediaType (var)`,
-`AlgorithmID (var)`, `FuzzyDigest (var)`, `ExactHash (fixed32)`,
+`AlgorithmID (var)`, `FuzzyDigest (var)`, `ExactHash (fixed32)`, `ExactAlg (var)`,
 `SignerPubKey (fixed32)`, `SubmittedAt (u64)`, `toolTraceHash (fixed32)`.
 
 `toolTraceHash` = BLAKE3-256 of `ToolTrace`, or 32 zero bytes when `ToolTrace` is
@@ -110,19 +111,33 @@ empty. Verify with `Ed25519.Verify(SignerPubKey, payload, Signature)`.
 
 ## 5. Content hashing
 
-**ExactHash** = `BLAKE3-256(media_bytes)`, 32 bytes. A verifier recomputes this over a
-candidate file; equality proves byte-identical content. BLAKE3 is a published standard
-with independent implementations, so this check needs no HII code.
+**ExactHash** (32 bytes) is a one-way digest of the exact media, and the field **`ExactAlg`
+names the algorithm** used:
+
+- **`blake3`** (or empty ⇒ blake3): `BLAKE3-256(media_bytes)`. Used by the server-side
+  media-digest path.
+- **`sha256`**: `SHA-256(file_bytes)`. Used by HII's file-based certifiers (e.g. the Word
+  add-in) which hash the **raw certified file bytes** (the exact `.docx`), because that is
+  the artifact the creator holds. A match therefore proves the candidate is the
+  byte-identical certified **file** — not merely the same text (a re-export or reformat
+  changes the bytes and will not exact-match; use the fuzzy digest for that).
+
+A verifier recomputes the hash named by `ExactAlg` over the candidate bytes and compares.
+Both BLAKE3 and SHA-256 are published standards with independent implementations, so this
+check needs no HII code. An `ExactAlg` the verifier does not recognize is treated as
+"not a match" (it cannot be checked), never a silent pass.
 
 ## 6. Fuzzy algorithms
 
 The `AlgorithmID` field selects the algorithm **and its version**. A verifier MUST use
-the algorithm matching the stored id; mismatched versions are not comparable. Two
-algorithms ship in v1. Both emit an **8-byte (64-bit) big-endian** digest, and both
-define distance as `popcount(a XOR b) / 64` (normalized Hamming, range `[0,1]`, `0` =
-identical). A pair is a *candidate match* when `distance ≤ threshold`.
+the algorithm matching the stored id; mismatched versions are not comparable. Each
+algorithm emits an **8-byte (64-bit) big-endian** digest and defines distance as
+`popcount(a XOR b) / 64` (normalized Hamming, range `[0,1]`, `0` = identical). A pair is a
+*candidate match* when `distance ≤ threshold`. The canonical text algorithm is
+**`simhash64-v1`** (§6.3); `simhash-text-v1` (§6.1) is a legacy text algorithm kept
+resolvable for older leaves; `phash-dct-64` (§6.2) covers images.
 
-### 6.1 `simhash-text-v1` (text)
+### 6.1 `simhash-text-v1` (text, legacy)
 
 64-bit SimHash over frequency-weighted word tokens. Steps:
 
@@ -169,11 +184,66 @@ identical). A pair is a *candidate match* when `distance ≤ threshold`.
 > re-implement, allow a small tolerance, or run our reference for an authoritative
 > digest.
 
+### 6.3 `simhash64-v1` (text) — canonical
+
+The content fingerprint HII certifiers compute client-side and record on the ledger.
+64-bit SimHash over normalized word 3-shingles with a **SHA-256 feature hash**. Steps:
+
+1. Interpret the media as **UTF-8** text.
+2. **Normalize** (the step that makes different file formats agree), in order:
+   1. Unicode **NFKC**.
+   2. Lowercase.
+   3. Fold curly single/double quotes → `'` / `"` and en/em/horizontal dashes → `-`.
+   4. Replace every run of characters that is **neither a Unicode letter nor a Unicode
+      digit** (`[^\p{L}\p{N}]+`) with a single space.
+   5. Trim leading/trailing spaces.
+3. **Tokenize:** split the normalized string on single spaces (drop empties).
+4. **Shingle:** join every **3** consecutive tokens with a single space. Fewer than 3
+   tokens ⇒ one shingle of all tokens (none when there are no tokens).
+5. For each shingle `s`: `feature = big-endian uint64 of SHA-256(utf8(s))[0:8]`.
+6. Signed accumulator `acc[0..63] = 0`. For each shingle and bit `i ∈ [0,64)`: if bit `i`
+   of `feature` is set, `acc[i] += 1`, else `acc[i] -= 1`. Bit `i` occupies value `1 << i`.
+7. Fingerprint bit `i` = `1` iff `acc[i] > 0`. Serialize the 64-bit fingerprint
+   **big-endian** into 8 bytes (equivalently, 16 lowercase hex chars, high 32 bits first).
+
+**Why SHA-256 features.** MurmurHash3 (the usual SimHash feature hash) has several
+mutually-incompatible variants (x86_32 vs x64_128, seed/sign handling); SHA-256 has
+exactly one definition in every language, so a third party reproduces this digest with
+only their standard library — no HII code, no variant ambiguity.
+
+**Threshold:** `0.15` (≤ 9 differing bits). Reference: `internal/fuzzy/simhash64.go`;
+golden vectors in `spec/simhash64-vectors.json`.
+
+> **Extraction note (re-implementers).** The fingerprint is defined over **text**. When
+> the certified work is a binary document (`.docx`, `.pdf`), the ledger digest was computed
+> over text the certifier extracted client-side; an independent verifier must extract text
+> and can differ slightly (tables, footnotes, word boundaries), shifting a few bits. The
+> hosted verifier reuses the same extraction libraries to minimize this. Treat a fuzzy
+> result as advisory (§1), never as proof.
+
 ## 7. Golden vectors
 
 Any conforming implementation MUST reproduce these digests exactly. They are also
 asserted in `internal/fuzzy/golden_test.go`; the image inputs are the committed files
 under `internal/fuzzy/testdata/`.
+
+### `simhash64-v1`
+
+The canonical vectors live in `spec/simhash64-vectors.json` — the single source of truth
+that the coc verifier **and** every HII certifier (customer-app, Word add-in, gdoc
+extension) reproduce byte-for-byte in their own test suites.
+
+| Input (exact UTF-8) | Digest (hex, big-endian) |
+|---------------------|--------------------------|
+| `The quick brown fox jumps over the lazy dog.` | `e7e097a95960e95f` |
+| `the   QUICK brown fox\tjumps over the lazy dog` (reformat of the above) | `e7e097a95960e95f` |
+| `Provenance you can verify.` | `f560282f20b80090` |
+| `café déjà vu 🎨 naïve façade` | `b1ea06b8a80badd3` |
+| `two words` (fewer than 3 tokens ⇒ one shingle) | `a03f1d611645eb53` |
+| `` (empty) | `0000000000000000` |
+
+The first two rows differ only in case, whitespace, and trailing punctuation, yet hash
+identically — that reformatting-invariance is the point of the fuzzy digest.
 
 ### `simhash-text-v1`
 
@@ -324,8 +394,10 @@ deliberately not built while records carry their own binding.
 
 ## 10. Versioning
 
-This spec is **v1**, matching `AlgorithmID` values `simhash-text-v1` and
-`phash-dct-64`. Any change to tokenization, hashing, bit ordering, thresholds, or the
-leaf wire format is a **breaking change** to this contract: it requires a new
-`AlgorithmID` (and a new spec revision), never an in-place edit. Stored leaves keep
-verifying against the version named in their `AlgorithmID`.
+This spec is **v1**, matching `AlgorithmID` values `simhash64-v1` (canonical text),
+`simhash-text-v1` (legacy text), and `phash-dct-64` (image). Any change to normalization,
+tokenization, hashing, bit ordering, thresholds, or the leaf wire format is a **breaking
+change** to this contract: it requires a new `AlgorithmID` (and a new spec revision),
+never an in-place edit. Stored leaves keep verifying against the version named in their
+`AlgorithmID`. `ExactHash` is accompanied by `ExactAlg` (`blake3` default, or `sha256`);
+adding a new exact-hash algorithm is likewise a versioned change.
