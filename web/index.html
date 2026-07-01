@@ -76,23 +76,23 @@
   <!-- wasm_exec.js is provided by the Go toolchain; build.sh copies it here. -->
   <script src="wasm_exec.js"></script>
   <script>
-    // CONFIG: the pinned trust anchor. In a deployed verifier these are baked to
-    // the target log's published values; the fields above let you override for
-    // local testing. The verifier ALWAYS verifies the checkpoint against this key
-    // — never the key the server presents.
-    const CONFIG = { origin: "", vkey: "", idRoot: "", baseUrl: "" };
-
     const go = new Go();
     const status = document.getElementById("status");
     const btn = document.getElementById("verify");
     const output = document.getElementById("output");
     const raw = document.getElementById("raw");
 
-    // Prefill log-config fields from CONFIG.
-    document.getElementById("origin").value = CONFIG.origin;
-    document.getElementById("vkey").value = CONFIG.vkey;
-    document.getElementById("idroot").value = CONFIG.idRoot;
-    document.getElementById("baseurl").value = CONFIG.baseUrl;
+    // The pinned trust anchors live in config.json, fetched at load (a deployed
+    // verifier ships it beside these assets; a local/mirrored copy without it
+    // leaves the fields blank for manual entry). The verifier ALWAYS verifies the
+    // checkpoint against this pinned key — never the key the server presents.
+    // config.json is data, not code: this HTML + the wasm stay static and portable.
+    fetch("config.json").then((r) => r.ok ? r.json() : {}).catch(() => ({})).then((cfg) => {
+      if (cfg.origin) document.getElementById("origin").value = cfg.origin;
+      if (cfg.vkey) document.getElementById("vkey").value = cfg.vkey;
+      if (cfg.idRoot) document.getElementById("idroot").value = cfg.idRoot;
+      if (cfg.baseUrl) document.getElementById("baseurl").value = cfg.baseUrl;
+    });
 
     // Pasting a receipt JSON auto-fills leaf / index / binding_index.
     document.getElementById("receipt").addEventListener("input", (e) => {
@@ -233,7 +233,9 @@
       const origin = document.getElementById("origin").value.trim();
       const vkey = document.getElementById("vkey").value.trim();
       const idRoot = document.getElementById("idroot").value.trim();
-      const baseUrl = document.getElementById("baseurl").value.trim();
+      // Empty read base URL ⇒ same origin (the CloudFront distribution serves both
+      // the verifier and the read path).
+      const baseUrl = document.getElementById("baseurl").value.trim() || window.location.origin;
 
       output.innerHTML = `<p class="status">Verifying…</p>`;
       try {
@@ -253,7 +255,7 @@
 
         // Log inclusion (async, needs network + the pinned config).
         let inc = null;
-        const wantInclusion = indexStr !== "" && origin && vkey && baseUrl;
+        const wantInclusion = indexStr !== "" && origin && vkey;
         if (wantInclusion) {
           output.innerHTML = body + `<p class="status">Checking log inclusion…</p>`;
           try {
@@ -268,7 +270,7 @@
 
         // Identity resolution (attestations only; needs binding index + identity root).
         let id = null;
-        const wantIdentity = result.kind === "attestation" && bindingIdxStr !== "" && idRoot && origin && vkey && baseUrl;
+        const wantIdentity = result.kind === "attestation" && bindingIdxStr !== "" && idRoot && origin && vkey;
         if (wantIdentity) {
           output.innerHTML = body + `<p class="status">Resolving creator identity…</p>`;
           try {
