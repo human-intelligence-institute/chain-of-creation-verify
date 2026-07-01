@@ -91,11 +91,14 @@ func exactMatch(media []byte, att *leaf.Attestation) bool {
 	}
 }
 
-// MatchMedia recomputes the exact hash and (when the algorithm supports it) the
-// fuzzy distance of media against an attestation.
-func MatchMedia(media []byte, att *leaf.Attestation, reg *fuzzy.Registry) ContentMatch {
+// MatchMedia recomputes the exact hash of rawBytes and (when the algorithm
+// supports it) the fuzzy distance of text against an attestation. HII leaves take
+// two inputs because the exact hash is over the raw certified file bytes (e.g. a
+// .docx) while the fuzzy digest is over the extracted text; pass the same slice
+// for both when the media is already plain text.
+func MatchMedia(rawBytes, text []byte, att *leaf.Attestation, reg *fuzzy.Registry) ContentMatch {
 	cm := ContentMatch{
-		ExactMatch:  exactMatch(media, att),
+		ExactMatch:  exactMatch(rawBytes, att),
 		AlgorithmID: att.AlgorithmID,
 	}
 	v, err := reg.Verifier(att.AlgorithmID)
@@ -103,7 +106,7 @@ func MatchMedia(media []byte, att *leaf.Attestation, reg *fuzzy.Registry) Conten
 		cm.Note = err.Error()
 		return cm
 	}
-	digest, err := v.Digest(media)
+	digest, err := v.Digest(text)
 	if err != nil {
 		cm.Note = "digest failed: " + err.Error()
 		return cm

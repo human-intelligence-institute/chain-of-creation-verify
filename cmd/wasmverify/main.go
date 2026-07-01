@@ -3,8 +3,11 @@
 // Command wasmverify exposes chain-of-creation verification to the browser. Built
 // with GOOS=js GOARCH=wasm, it registers two globals:
 //
-//   - cocVerifyLeaf(leafB64, mediaB64?) string
-//     Offline: signature + content match. Synchronous (no network).
+//   - cocVerifyLeaf(leafB64, rawBytesB64?, textB64?) string
+//     Offline: signature + content match. Synchronous (no network). rawBytesB64
+//     is the raw candidate file bytes (exact hash); textB64 is the extracted text
+//     (fuzzy digest). Omit textB64 for plain-text media — the raw bytes are then
+//     used for both, preserving the single-input behaviour.
 //
 //   - cocVerifyInclusion(leafB64, index, readBaseURL, origin, vkey) Promise<string>
 //     Proves the leaf is committed in the published log: fetches the signed
@@ -36,7 +39,7 @@ func main() {
 	select {} // keep the Go runtime alive for callbacks
 }
 
-// verifyLeaf(leafBase64 string, mediaBase64 string|null) -> JSON string.
+// verifyLeaf(leafBase64 string, rawBytesBase64 string|null, textBase64 string|null) -> JSON string.
 func verifyLeaf(_ js.Value, args []js.Value) any {
 	if len(args) < 1 || args[0].Type() != js.TypeString {
 		return errJSON("first argument must be a base64 leaf string")
@@ -45,14 +48,20 @@ func verifyLeaf(_ js.Value, args []js.Value) any {
 	if err != nil {
 		return errJSON("leaf is not valid base64")
 	}
-	var media []byte
+	var rawBytes, text []byte
 	if len(args) > 1 && args[1].Type() == js.TypeString {
-		media, err = base64.StdEncoding.DecodeString(args[1].String())
+		rawBytes, err = base64.StdEncoding.DecodeString(args[1].String())
 		if err != nil {
 			return errJSON("media is not valid base64")
 		}
 	}
-	res, err := cocverify.VerifyLeaf(rawLeaf, media)
+	if len(args) > 2 && args[2].Type() == js.TypeString {
+		text, err = base64.StdEncoding.DecodeString(args[2].String())
+		if err != nil {
+			return errJSON("text is not valid base64")
+		}
+	}
+	res, err := cocverify.VerifyLeaf(rawLeaf, rawBytes, text)
 	if err != nil {
 		return errJSON(err.Error())
 	}

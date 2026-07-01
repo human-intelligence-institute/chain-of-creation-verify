@@ -29,8 +29,12 @@ type LeafResult struct {
 }
 
 // VerifyLeaf decodes a raw leaf, verifies its signature, and — for an
-// attestation when media is non-nil — reports the content match.
-func VerifyLeaf(rawLeaf, media []byte) (LeafResult, error) {
+// attestation when rawBytes is non-nil — reports the content match. rawBytes are
+// the raw candidate file bytes (checked against the exact hash); text is the
+// extracted text (checked against the fuzzy digest). Pass text=nil when the media
+// is already plain text: the raw bytes are then used for both, preserving the
+// single-input .txt behaviour.
+func VerifyLeaf(rawLeaf, rawBytes, text []byte) (LeafResult, error) {
 	kind, err := leaf.PeekKind(rawLeaf)
 	if err != nil {
 		return LeafResult{}, err
@@ -50,8 +54,12 @@ func VerifyLeaf(rawLeaf, media []byte) (LeafResult, error) {
 			EventSeq:       att.EventSeq,
 			EventType:      string(att.EventType),
 		}
-		if media != nil {
-			cm := verify.MatchMedia(media, att, fuzzy.Default())
+		if rawBytes != nil {
+			ft := text
+			if ft == nil {
+				ft = rawBytes
+			}
+			cm := verify.MatchMedia(rawBytes, ft, att, fuzzy.Default())
 			res.Content = &cm
 		}
 		return res, nil

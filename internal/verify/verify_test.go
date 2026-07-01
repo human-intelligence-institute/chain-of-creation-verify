@@ -95,7 +95,7 @@ func TestMatchMediaExact(t *testing.T) {
 	media := []byte("the original work text that was registered")
 	att := textAttestation(t, media, priv)
 
-	cm := MatchMedia(media, att, fuzzy.Default())
+	cm := MatchMedia(media, media, att, fuzzy.Default())
 	if !cm.ExactMatch {
 		t.Fatal("identical media should match exactly")
 	}
@@ -110,7 +110,7 @@ func TestMatchMediaFuzzyOnly(t *testing.T) {
 	att := textAttestation(t, original, priv)
 
 	reformatted := []byte("the original work text that was registered with punctuation")
-	cm := MatchMedia(reformatted, att, fuzzy.Default())
+	cm := MatchMedia(reformatted, reformatted, att, fuzzy.Default())
 	if cm.ExactMatch {
 		t.Fatal("reformatted media should not match exactly")
 	}
@@ -124,7 +124,7 @@ func TestMatchMediaUnsupportedAlgorithm(t *testing.T) {
 	att := textAttestation(t, []byte("x"), priv)
 	att.AlgorithmID = "chromaprint-v2" // not registered for verification
 
-	cm := MatchMedia([]byte("x"), att, fuzzy.Default())
+	cm := MatchMedia([]byte("x"), []byte("x"), att, fuzzy.Default())
 	if cm.FuzzyChecked {
 		t.Fatal("unsupported algorithm should not be fuzzy-checked")
 	}
@@ -142,7 +142,7 @@ func TestMatchMediaHIILeaf(t *testing.T) {
 	media := []byte("the certified written work, in plain text")
 	att := hiiAttestation(t, media, media, priv)
 
-	cm := MatchMedia(media, att, fuzzy.Default())
+	cm := MatchMedia(media, media, att, fuzzy.Default())
 	if !cm.ExactMatch {
 		t.Fatal("sha256 exact hash should match the identical raw bytes")
 	}
@@ -163,7 +163,7 @@ func TestMatchMediaHIIEditedCopy(t *testing.T) {
 	att := hiiAttestation(t, original, original, priv)
 
 	edited := append(append([]byte{}, original...), []byte(" plus one more clause")...)
-	cm := MatchMedia(edited, att, fuzzy.Default())
+	cm := MatchMedia(edited, edited, att, fuzzy.Default())
 	if cm.ExactMatch {
 		t.Fatal("an edited copy must not exact-match")
 	}

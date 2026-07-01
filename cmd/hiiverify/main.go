@@ -90,7 +90,7 @@ func run() error {
 		if err != nil {
 			return err
 		}
-		match := verify.MatchMedia(media, target.Att, fuzzy.Default())
+		match := verify.MatchMedia(media, media, target.Att, fuzzy.Default())
 		report.Content = &verify.MediaReport{
 			TargetLeafHashHex: hex.EncodeToString(target.Hash[:]),
 			Match:             match,

@@ -34,7 +34,7 @@
 </head>
 <body>
   <h1>chain-of-creation verifier</h1>
-  <p class="hint">Offline reference verifier — runs entirely in your browser (WebAssembly). Your media file is never uploaded; log artifacts (checkpoint + tiles) are fetched read-only to prove inclusion.</p>
+  <p class="hint">Offline reference verifier — runs entirely in your browser (WebAssembly). Your media file is never uploaded; text extraction for .docx/.pdf also happens locally. Only log artifacts (checkpoint + tiles) are fetched read-only to prove inclusion.</p>
   <p class="status" id="status">Loading WebAssembly…</p>
 
   <label for="receipt">Receipt (JSON)<span class="hint"> — optional; paste <code>{"leaf","index","binding_index"}</code> to auto-fill the fields below</span></label>
@@ -43,8 +43,8 @@
   <label for="leaf">Leaf (base64)<span class="hint"> — the canonical leaf bytes from the log record</span></label>
   <textarea id="leaf" rows="4" placeholder="base64-encoded canonical leaf bytes"></textarea>
 
-  <label for="media">Media file<span class="hint"> — optional; the work you want to check against this attestation</span></label>
-  <input type="file" id="media" />
+  <label for="media">Media file<span class="hint"> — optional; the work (.docx, .pdf, or .txt) you want to check against this attestation. Exact match is over the raw file bytes; fuzzy match is over text extracted locally.</span></label>
+  <input type="file" id="media" accept=".txt,.docx,.pdf,text/plain,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
 
   <label for="index">Log index<span class="hint"> — optional; from the receipt. Provide it to check log inclusion.</span></label>
   <input type="number" id="index" min="0" step="1" placeholder="e.g. 0" />
@@ -143,21 +143,86 @@
       });
     }
 
+    function utf8ToBase64(str) {
+      const bytes = new TextEncoder().encode(str);
+      let binary = "";
+      const chunk = 0x8000;
+      for (let i = 0; i < bytes.length; i += chunk) {
+        binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+      }
+      return btoa(binary);
+    }
+
+    // Local text extraction. mammoth (.docx) and pdf.js (.pdf) are vendored under
+    // web/vendor and loaded ONLY when that file type is chosen — they never touch
+    // the network and don't load until needed. The extracted text is what the
+    // certifier fingerprinted; the fuzzy digest is computed over it (the exact hash
+    // uses the raw file bytes instead). This mirrors the customer-app extractText.
+    const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+    function detectKind(file) {
+      const n = file.name.toLowerCase();
+      if (n.endsWith(".txt") || file.type === "text/plain") return "txt";
+      if (n.endsWith(".docx") || file.type === DOCX_MIME) return "docx";
+      if (n.endsWith(".pdf") || file.type === "application/pdf") return "pdf";
+      return null;
+    }
+    let _mammoth = null, _pdfjs = null;
+    function loadMammoth() {
+      if (_mammoth) return Promise.resolve(_mammoth);
+      return new Promise((resolve, reject) => {
+        const s = document.createElement("script");
+        s.src = "vendor/mammoth.browser.min.js";
+        s.onload = () => { _mammoth = window.mammoth; resolve(_mammoth); };
+        s.onerror = () => reject(new Error("could not load the local .docx reader (vendor/mammoth.browser.min.js)"));
+        document.head.appendChild(s);
+      });
+    }
+    async function loadPdfjs() {
+      if (_pdfjs) return _pdfjs;
+      _pdfjs = await import("./vendor/pdf.min.mjs");
+      _pdfjs.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.mjs";
+      return _pdfjs;
+    }
+    async function extractText(file) {
+      const kind = detectKind(file);
+      if (!kind) throw new Error("unsupported file type — upload a .docx, .pdf, or .txt");
+      if (kind === "txt") return await file.text();
+      if (kind === "docx") {
+        const m = await loadMammoth();
+        const arrayBuffer = await file.arrayBuffer();
+        const { value } = await m.extractRawText({ arrayBuffer });
+        return value || "";
+      }
+      const pdfjs = await loadPdfjs();
+      const data = await file.arrayBuffer();
+      const doc = await pdfjs.getDocument({ data }).promise;
+      const parts = [];
+      for (let i = 1; i <= doc.numPages; i++) {
+        const page = await doc.getPage(i);
+        const content = await page.getTextContent();
+        parts.push(content.items.map((it) => ("str" in it ? it.str : "")).join(" "));
+      }
+      return parts.join("\n");
+    }
+
     function row(k, v, cls) {
       return `<div class="row"><div class="k">${k}</div><div class="v ${cls || ""}">${v}</div></div>`;
     }
 
-    function renderContent(c) {
+    function renderContent(c, extractNote) {
       if (!c) {
-        return `<div class="banner">No media file provided — content was not checked. Choose the work file to test exact and fuzzy matches.</div>`;
+        return `<div class="banner">No media file provided — content was not checked. Choose the work file (.docx / .pdf / .txt) to test exact and fuzzy matches.</div>`;
       }
       let html = row("Algorithm", c.algorithm_id || "—");
       if (c.exact_match) {
-        html += row("Exact match", "✓ byte-identical to the certified media", "strong");
-        html += `<div class="hint">Cryptographically strong (BLAKE3-256). This file IS the certified bytes.</div>`;
+        html += row("Exact match", "✓ byte-identical to the certified file", "strong");
+        html += `<div class="hint">Cryptographically strong (exact hash over the raw file bytes). This file IS the certified bytes.</div>`;
       } else {
         html += row("Exact match", "✗ not byte-identical", "");
-        if (c.fuzzy_checked) {
+        if (extractNote) {
+          html += row("Fuzzy match", "not run", "");
+          html += `<div class="hint">Fuzzy comparison was skipped: ${extractNote}. The exact (byte-identical) check above still ran.</div>`;
+        } else if (c.fuzzy_checked) {
           const within = c.fuzzy_match;
           html += row("Fuzzy distance",
             `${c.fuzzy_distance.toFixed(4)} (threshold ${c.fuzzy_threshold.toFixed(4)}) — ${within ? "within" : "above"} threshold`,
@@ -251,9 +316,24 @@
       const baseUrl = document.getElementById("baseurl").value.trim() || window.location.origin;
 
       output.innerHTML = `<p class="status">Verifying…</p>`;
+      let extractNote = null;
       try {
-        const mediaB64 = file ? await fileToBase64(file) : null;
-        const json = mediaB64 ? cocVerifyLeaf(leaf, mediaB64) : cocVerifyLeaf(leaf);
+        // Exact hash needs the RAW file bytes; fuzzy needs the extracted text.
+        // If extraction fails (or the type is unsupported) we still run the exact
+        // check over the raw bytes and mark fuzzy as skipped.
+        let rawB64 = null, textB64 = null;
+        if (file) {
+          rawB64 = await fileToBase64(file);
+          try {
+            output.innerHTML = `<p class="status">Extracting text…</p>`;
+            textB64 = utf8ToBase64(await extractText(file));
+          } catch (e) {
+            extractNote = String((e && e.message) || e);
+          }
+        }
+        const json = rawB64
+          ? (textB64 !== null ? cocVerifyLeaf(leaf, rawB64, textB64) : cocVerifyLeaf(leaf, rawB64))
+          : cocVerifyLeaf(leaf);
         let result;
         try { result = JSON.parse(json); } catch { result = { error: json }; }
         raw.textContent = JSON.stringify(result, null, 2);
@@ -264,7 +344,7 @@
         }
 
         let body = renderHead(result);
-        if (result.kind === "attestation") body += renderContent(result.content);
+        if (result.kind === "attestation") body += renderContent(result.content, extractNote);
 
         // Log inclusion (async, needs network + the pinned config).
         let inc = null;
