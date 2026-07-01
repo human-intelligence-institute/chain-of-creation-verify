@@ -105,6 +105,19 @@
       if (r.binding_index !== undefined) document.getElementById("binding_index").value = r.binding_index;
     });
 
+    // Deep-link prefill: opening .../#receipt=<url-encoded receipt JSON> (or
+    // ?receipt=...) populates the form. The hash form is preferred — a fragment
+    // never leaves the browser (not sent to the server or logged). We drop the
+    // value into the receipt textarea and fire its input handler to fill fields.
+    (function prefillFromUrl() {
+      const raw = new URLSearchParams(location.hash.replace(/^#/, "")).get("receipt")
+        || new URLSearchParams(location.search).get("receipt");
+      if (!raw) return;
+      const el = document.getElementById("receipt");
+      el.value = raw;
+      el.dispatchEvent(new Event("input"));
+    })();
+
     WebAssembly.instantiateStreaming(fetch("cocverify.wasm"), go.importObject)
       .then((res) => {
         go.run(res.instance);
