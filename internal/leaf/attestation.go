@@ -23,7 +23,8 @@ type Attestation struct {
 	MediaType   MediaType
 	AlgorithmID string // fuzzy-hash algorithm id, e.g. "tlsh-v1"
 	FuzzyDigest []byte // opaque, algorithm-specific
-	ExactHash   Hash   // BLAKE3 of the exact media bytes
+	ExactHash   Hash   // exact hash of the media bytes (algorithm named by ExactAlg)
+	ExactAlg    string // exact-hash algorithm id, e.g. "blake3" or "sha256"; "" when unspecified
 
 	SignerPubKey [32]byte // ed25519 public key
 	Signature    [64]byte // over signingPayload()
@@ -62,6 +63,7 @@ func (a *Attestation) signingPayload() []byte {
 	e.str(a.AlgorithmID)
 	e.bytes(a.FuzzyDigest)
 	e.fixed(a.ExactHash[:])
+	e.str(a.ExactAlg)
 	e.fixed(a.SignerPubKey[:])
 	e.u64(a.SubmittedAt)
 	tth := a.toolTraceHash()
@@ -100,6 +102,7 @@ func (a *Attestation) Marshal() []byte {
 	e.str(a.AlgorithmID)
 	e.bytes(a.FuzzyDigest)
 	e.fixed(a.ExactHash[:])
+	e.str(a.ExactAlg)
 	e.fixed(a.SignerPubKey[:])
 	e.fixed(a.Signature[:])
 	e.u64(a.SubmittedAt)
@@ -172,6 +175,9 @@ func UnmarshalAttestation(b []byte) (*Attestation, error) {
 		return nil, err
 	}
 	copy(a.ExactHash[:], eh)
+	if a.ExactAlg, err = d.str(); err != nil {
+		return nil, err
+	}
 	pk, err := d.fixed(32)
 	if err != nil {
 		return nil, err

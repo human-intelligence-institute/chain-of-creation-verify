@@ -23,7 +23,11 @@ type Params struct {
 	EventType   leaf.EventType
 	MediaType   leaf.MediaType
 	AlgorithmID string
-	ToolTrace   []byte
+	// ExactAlg names the algorithm used to compute the precomputed exact hash
+	// (e.g. "sha256"). Empty when unspecified. Only the precomputed path uses it;
+	// the media path always hashes with BLAKE3.
+	ExactAlg  string
+	ToolTrace []byte
 	// Now overrides the submission timestamp (for tests); zero means time.Now.
 	Now time.Time
 }
@@ -69,6 +73,33 @@ func Build(media []byte, p Params, reg *fuzzy.Registry) (*leaf.Attestation, erro
 		AlgorithmID:   d.ID(),
 		FuzzyDigest:   digest,
 		ExactHash:     leaf.HashContent(media),
+		SubmittedAt:   uint64(now.UnixMilli()),
+		ToolTrace:     p.ToolTrace,
+	}, nil
+}
+
+// BuildPrecomputed assembles an unsigned Attestation from digests the caller
+// already computed — coc does not hash media here. It is the path for callers
+// (e.g. HII certifiers) that hold only the normalized provenance triple and may
+// never have the original media. AlgorithmID is stored verbatim; no registry
+// lookup happens, so any algorithm id (including one whose Go digester is not
+// registered) is accepted. The returned attestation still needs a call to Sign.
+func BuildPrecomputed(exactHash leaf.Hash, fuzzyDigest []byte, p Params) (*leaf.Attestation, error) {
+	now := p.Now
+	if now.IsZero() {
+		now = time.Now()
+	}
+	return &leaf.Attestation{
+		SchemaVersion: 1,
+		WorkID:        p.WorkID,
+		EventSeq:      p.EventSeq,
+		PrevEventHash: p.Prev,
+		EventType:     p.EventType,
+		MediaType:     p.MediaType,
+		AlgorithmID:   p.AlgorithmID,
+		FuzzyDigest:   fuzzyDigest,
+		ExactHash:     exactHash,
+		ExactAlg:      p.ExactAlg,
 		SubmittedAt:   uint64(now.UnixMilli()),
 		ToolTrace:     p.ToolTrace,
 	}, nil

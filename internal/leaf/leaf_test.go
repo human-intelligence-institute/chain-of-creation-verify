@@ -27,6 +27,7 @@ func sampleAttestation() *Attestation {
 		AlgorithmID:   "tlsh-v1",
 		FuzzyDigest:   []byte("digest-bytes"),
 		ExactHash:     Hash{0xde, 0xad, 0xbe, 0xef},
+		ExactAlg:      "blake3",
 		SubmittedAt:   1_700_000_000_000,
 		ToolTrace:     []byte(`{"editor":"vim"}`),
 	}
@@ -100,6 +101,29 @@ func TestToolTraceTamperBreaksVerification(t *testing.T) {
 	a.ToolTrace = []byte(`{"editor":"emacs"}`)
 	if a.Verify() {
 		t.Fatal("verification passed after tampering with ToolTrace")
+	}
+}
+
+func TestExactAlgRoundTripAndTamper(t *testing.T) {
+	_, priv := mustKey(t)
+	a := sampleAttestation()
+	a.ExactAlg = "sha256"
+	a.Sign(priv)
+
+	got, err := UnmarshalAttestation(a.Marshal())
+	if err != nil {
+		t.Fatalf("UnmarshalAttestation: %v", err)
+	}
+	if got.ExactAlg != "sha256" {
+		t.Fatalf("ExactAlg did not round-trip: got %q", got.ExactAlg)
+	}
+	if !got.Verify() {
+		t.Fatal("decoded attestation fails verification")
+	}
+
+	a.ExactAlg = "blake3"
+	if a.Verify() {
+		t.Fatal("verification passed after tampering with ExactAlg")
 	}
 }
 
