@@ -3,75 +3,279 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>chain-of-creation — verifier</title>
+  <title>Chain-of-Creation Verifier</title>
   <style>
-    body { font: 15px/1.5 system-ui, sans-serif; max-width: 760px; margin: 2rem auto; padding: 0 1rem; color: #1a1a1a; }
-    h1 { margin-bottom: 0.25rem; }
-    label { display: block; font-weight: 600; margin: 1rem 0 0.25rem; }
-    textarea, input[type=file], input[type=text], input[type=number] { width: 100%; box-sizing: border-box; }
-    textarea, input[type=text], input[type=number] { font-family: ui-monospace, monospace; }
-    input[type=number] { max-width: 12rem; }
-    button { margin-top: 1rem; padding: 0.5rem 1rem; font-size: 1rem; cursor: pointer; }
-    button:disabled { cursor: default; opacity: 0.5; }
-    .status { color: #666; }
-    .hint { color: #666; font-weight: 400; font-size: 0.85em; }
-    .card { border: 1px solid #ddd; border-radius: 8px; padding: 1rem 1.25rem; margin-top: 1rem; }
-    .row { display: flex; gap: 0.5rem; padding: 0.2rem 0; }
-    .row .k { width: 9rem; color: #555; flex: none; }
-    .row .v { font-family: ui-monospace, monospace; word-break: break-all; }
-    .ok { color: #137333; font-weight: 600; }
-    .bad { color: #b00020; font-weight: 600; }
-    .strong { color: #137333; font-weight: 600; }
-    .advisory { color: #8a5a00; font-weight: 600; }
-    .good { border-left: 4px solid #137333; background: #eaf5ec; padding: 0.6rem 0.9rem; margin-top: 1rem; font-size: 0.92em; }
-    .banner { border-left: 4px solid #8a5a00; background: #fff8e6; padding: 0.6rem 0.9rem; margin-top: 1rem; font-size: 0.92em; }
-    .err { border-left: 4px solid #b00020; background: #fdecef; padding: 0.6rem 0.9rem; margin-top: 1rem; }
-    details { margin-top: 1rem; } summary { cursor: pointer; color: #666; }
-    pre { background: #f5f5f5; padding: 1rem; overflow: auto; white-space: pre-wrap; word-break: break-all; }
-    fieldset { margin-top: 1rem; border: 1px solid #ddd; border-radius: 8px; }
-    legend { color: #555; font-size: 0.9em; padding: 0 0.4rem; }
+    :root{
+      --ink:#132132; --page:#F6F8FA; --card:#FFFFFF; --line:#E3E8EE;
+      --slate:#5B6B7B; --slate-bg:#EEF2F6;
+      --green:#137333; --green-bg:#E7F4EC; --green-line:#B9DEC6;
+      --amber:#8A5A00; --amber-bg:#FDF3DA; --amber-line:#EAD79B;
+      --red:#B00020; --red-bg:#FCEBED; --red-line:#E6BCC4;
+      --shadow:0 1px 2px rgba(19,33,50,.06), 0 6px 20px rgba(19,33,50,.04);
+      --disp:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+      --body:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+      --mono:ui-monospace,"SF Mono",Menlo,"Cascadia Mono","Roboto Mono",monospace;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--page);color:#2A3644;font-family:var(--body);
+      font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased;}
+    .wrap{max-width:760px;margin:0 auto;padding:40px 20px 80px;}
+    .results .wrap-inner{max-width:840px}
+
+    /* ---- header ---- */
+    .brand{display:flex;align-items:center;gap:11px;margin-bottom:20px}
+    .seal{width:38px;height:38px;border-radius:50%;display:block;flex:none}
+    h1{font-family:var(--disp);font-weight:600;font-size:20px;color:var(--ink);
+      margin:0;letter-spacing:-.015em}
+    .claim{font-size:15px;line-height:1.55;color:#2A3644;max-width:64ch;margin:0}
+    .claim b{color:var(--ink);font-weight:600}
+    .proves{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}
+    .chip{font-size:12.5px;color:var(--slate);background:var(--slate-bg);
+      border:1px solid var(--line);border-radius:999px;padding:5px 11px;font-weight:500}
+    .how{margin-top:14px;font-size:13px;color:var(--slate)}
+    details.how-d{margin-top:12px}
+    details.how-d summary{list-style:none;cursor:pointer;font-size:13px;color:var(--slate);
+      display:inline-flex;align-items:center;gap:7px}
+    details.how-d summary::-webkit-details-marker{display:none}
+    details.how-d summary .caret2{font-size:18px;line-height:1;color:#9AA7B4;
+      transition:transform .18s ease;display:inline-block}
+    details.how-d[open] summary .caret2{transform:rotate(90deg)}
+    details.how-d[open] summary{margin-bottom:8px}
+    details.how-d .body{font-size:13.5px;color:#3A4757;max-width:64ch;
+      background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+    details.how-d .body p{margin:0 0 8px} details.how-d .body p:last-child{margin:0}
+
+    .rule{height:1px;background:var(--line);margin:26px 0}
+
+    .status{color:var(--slate);font-size:13.5px;margin:0 0 4px}
+
+    /* ---- ready summary ---- */
+    .ready{background:var(--card);border:1px solid var(--line);border-radius:10px;
+      padding:15px 17px;display:flex;gap:12px;align-items:flex-start;box-shadow:var(--shadow)}
+    .ready .dot{width:9px;height:9px;border-radius:50%;background:var(--green);
+      margin-top:6px;flex:none;box-shadow:0 0 0 4px var(--green-bg)}
+    .ready .t{font-size:14px;line-height:1.5} .ready .t b{color:var(--ink)}
+
+    /* ---- drop zone ---- */
+    .drop{margin-top:18px;border:1.5px dashed #B7C2CE;border-radius:12px;
+      background:#FBFCFD;padding:28px;text-align:center;cursor:pointer;transition:border-color .12s,background .12s}
+    .drop:hover,.drop.drag{border-color:var(--ink);background:#F3F6F9}
+    .drop .ic{width:38px;height:38px;border-radius:10px;background:var(--slate-bg);
+      display:inline-flex;align-items:center;justify-content:center;margin-bottom:10px;
+      color:var(--slate);font-size:19px}
+    .drop .big{font-size:15px;font-weight:600;color:var(--ink)}
+    .drop .sub{font-size:13px;color:var(--slate);margin-top:4px}
+    .drop.has-file{border-style:solid;border-color:var(--green-line);background:var(--green-bg)}
+    .drop.has-file .ic{background:#fff;color:var(--green)}
+
+    .actions{display:flex;gap:12px;align-items:center;margin-top:20px;flex-wrap:wrap}
+    .btn{font-family:var(--body);font-weight:600;font-size:15px;border-radius:9px;
+      padding:13px 26px;border:0;cursor:pointer;transition:opacity .12s,background .12s}
+    .btn:focus-visible{outline:3px solid rgba(19,33,50,.35);outline-offset:2px}
+    .btn-primary{background:var(--ink);color:#fff}
+    .btn-primary:hover{background:#1e3450}
+    .btn-primary:disabled{opacity:.45;cursor:default}
+
+    /* ---- disclosures ---- */
+    details.panel{margin-top:20px;border:1px solid var(--line);border-radius:10px;
+      background:var(--card);overflow:hidden}
+    details.panel > summary{list-style:none;cursor:pointer;padding:13px 16px;
+      display:flex;align-items:center;gap:10px;font-size:13.5px;color:var(--slate);font-weight:500}
+    details.panel > summary::-webkit-details-marker{display:none}
+    details.panel > summary .caret{margin-left:auto;color:#9AA7B4;transition:transform .15s}
+    details.panel[open] > summary .caret{transform:rotate(90deg)}
+    .panel-body{padding:4px 16px 16px}
+    label{display:block;font-weight:600;font-size:13px;color:var(--ink);margin:12px 0 5px}
+    label .hint{font-weight:400;color:var(--slate);font-size:12px}
+    textarea,input[type=text],input[type=number]{width:100%;box-sizing:border-box;
+      font-family:var(--mono);font-size:12.5px;border:1px solid var(--line);border-radius:7px;
+      padding:8px 10px;color:var(--ink);background:#FBFCFD}
+    textarea:focus,input:focus{outline:2px solid rgba(19,33,50,.25);outline-offset:0;border-color:#AEB9C6}
+    input[type=number]{max-width:12rem}
+
+    /* ---- sealed trust-anchor card ---- */
+    .anchor{background:var(--card);border:1px solid var(--line);border-radius:10px;
+      padding:15px 18px;margin-top:14px;box-shadow:var(--shadow)}
+    .anchor .top{display:flex;align-items:center;gap:9px;font-size:13.5px;color:var(--ink);font-weight:600}
+    .anchor .fp{font-family:var(--mono);font-size:12.5px;color:var(--slate);margin-top:8px;word-break:break-all}
+    .anchor .note{font-size:12.5px;color:var(--slate);margin-top:8px;line-height:1.5}
+    .anchor details.adv{margin-top:10px}
+    .anchor details.adv summary{list-style:none;cursor:pointer;font-size:12.5px;color:var(--slate);
+      border-bottom:1px dotted #9AA7B4;display:inline-block}
+    .anchor details.adv summary::-webkit-details-marker{display:none}
+
+    /* ================= results ================= */
+    #output:empty{display:none}
+    .verdict{border-radius:14px;padding:22px 24px;display:flex;gap:16px;align-items:center;
+      border:1px solid;margin-top:24px}
+    .verdict.g{background:var(--green-bg);border-color:var(--green-line)}
+    .verdict.a{background:var(--amber-bg);border-color:var(--amber-line)}
+    .verdict.r{background:var(--red-bg);border-color:var(--red-line)}
+    .verdict .glyph{width:52px;height:52px;border-radius:13px;background:#fff;display:flex;
+      align-items:center;justify-content:center;font-size:26px;flex:none;border:1px solid}
+    .verdict.g .glyph{border-color:var(--green-line);color:var(--green)}
+    .verdict.a .glyph{border-color:var(--amber-line);color:var(--amber)}
+    .verdict.r .glyph{border-color:var(--red-line);color:var(--red)}
+    .verdict h2{font-family:var(--disp);font-weight:600;font-size:21px;letter-spacing:-.01em;
+      margin:0 0 4px;color:var(--ink)}
+    .verdict p{margin:0;font-size:14px;line-height:1.5;color:#3A4757}
+    .verdict .meta{font-family:var(--mono);font-size:11.5px;color:var(--slate);margin-top:8px}
+    .info{position:relative;display:inline-flex;align-items:center;justify-content:center;
+      width:16px;height:16px;border-radius:50%;border:1.3px solid var(--slate);color:var(--slate);
+      font-size:10px;font-weight:700;font-style:normal;font-family:var(--body);line-height:1;
+      cursor:help;margin-left:3px;vertical-align:1px}
+    .info:focus-visible{outline:2px solid rgba(19,33,50,.35);outline-offset:2px}
+    .info .tip{position:absolute;bottom:150%;left:50%;transform:translateX(-50%);width:min(280px,78vw);
+      background:var(--ink);color:#fff;font-size:12px;line-height:1.5;font-weight:400;text-align:left;
+      padding:11px 13px;border-radius:9px;box-shadow:0 6px 24px rgba(19,33,50,.28);
+      opacity:0;visibility:hidden;transition:opacity .12s;z-index:6}
+    .info:hover .tip,.info:focus .tip,.info:focus-within .tip{opacity:1;visibility:visible}
+    .info .tip::after{content:"";position:absolute;top:100%;left:50%;transform:translateX(-50%);
+      border:6px solid transparent;border-top-color:var(--ink)}
+
+    .result{position:relative;margin-top:22px}
+    .result::before{content:"";position:absolute;left:21px;top:22px;bottom:22px;width:2px;background:var(--line)}
+    .link{position:relative;z-index:1;width:32px;height:32px;border-radius:50%;display:flex;
+      align-items:center;justify-content:center;font-family:var(--disp);font-weight:600;font-size:14px}
+    .link.g{background:var(--green);color:#fff}
+    .link.a{background:var(--amber);color:#fff}
+    .link.r{background:var(--red);color:#fff}
+    .link.n{background:var(--slate-bg);color:var(--slate);border:1px solid var(--line)}
+    .cell{display:grid;grid-template-columns:44px 1fr;gap:0 18px;margin-bottom:14px;align-items:start}
+    .cell:last-child{margin-bottom:0}
+    .rail-col{display:flex;justify-content:center;padding-top:14px}
+    .kcard{background:var(--card);border:1px solid var(--line);border-radius:10px;
+      padding:15px 18px;box-shadow:var(--shadow);border-left:4px solid var(--line)}
+    .kcard.g{border-left-color:var(--green)}
+    .kcard.a{border-left-color:var(--amber)}
+    .kcard.r{border-left-color:var(--red)}
+    .kcard.n{border-left-color:var(--line)}
+    .cardtitle{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--slate);
+      font-weight:600;margin-bottom:9px}
+    .krow{display:flex;padding:3px 0;font-size:13.5px}
+    .krow .k{width:132px;flex:none;color:var(--slate);font-size:12px;text-transform:uppercase;
+      letter-spacing:.04em;padding-top:2px}
+    .krow .v{font-family:var(--mono);font-size:13px;color:var(--ink);word-break:break-all}
+    .krow .v.plain{font-family:var(--body);font-size:13.5px}
+    .tag{font-weight:600}
+    .tag.g{color:var(--green)} .tag.a{color:var(--amber)} .tag.r{color:var(--red)}
+    .hint{font-size:12.5px;color:var(--slate);line-height:1.5;margin-top:8px}
+    .hint em{color:var(--ink);font-style:italic}
+
+    .err-box{border:1px solid var(--red-line);background:var(--red-bg);border-radius:12px;
+      padding:16px 18px;margin-top:24px;color:var(--ink)}
+    .err-box b{color:var(--red)}
+
+    details.raw{margin-top:22px}
+    details.raw summary{cursor:pointer;color:var(--slate);font-size:13px}
+    pre{background:#0f1a28;color:#cdd8e6;padding:14px 16px;border-radius:8px;overflow:auto;
+      white-space:pre-wrap;word-break:break-all;font-family:var(--mono);font-size:12px;line-height:1.5}
+
+    /* staged reveal */
+    @media (prefers-reduced-motion: no-preference){
+      .reveal{opacity:0;transform:translateY(6px);animation:rise .42s ease forwards}
+      .verdict.reveal{animation-delay:0s}
+      .cell.reveal:nth-child(1){animation-delay:.10s}
+      .cell.reveal:nth-child(2){animation-delay:.20s}
+      .cell.reveal:nth-child(3){animation-delay:.30s}
+      .cell.reveal:nth-child(4){animation-delay:.40s}
+      @keyframes rise{to{opacity:1;transform:none}}
+    }
+
+    @media (max-width:640px){
+      .result::before{display:none}
+      .cell{grid-template-columns:1fr;gap:0}
+      .rail-col{justify-content:flex-start;padding:0 0 8px}
+      .link{width:24px;height:24px;font-size:12px}
+      .btn-primary{width:100%}
+      .krow{flex-direction:column;gap:1px}.krow .k{width:auto}
+    }
   </style>
 </head>
 <body>
-  <h1>chain-of-creation verifier</h1>
-  <p class="hint">Offline reference verifier — runs entirely in your browser (WebAssembly). Your media file is never uploaded; text extraction for .docx/.pdf also happens locally. Only log artifacts (checkpoint + tiles) are fetched read-only to prove inclusion.</p>
-  <p class="status" id="status">Loading WebAssembly…</p>
+<div class="wrap">
+  <div class="brand"><img class="seal" src="hii-logo.png" alt="HII" /><h1>Chain-of-Creation Verifier</h1></div>
+  <p class="claim"><b>An independent check that runs on your device.</b> The file you test never
+    leaves your browser — we can’t see it, and neither can the creator or seller. This page reads
+    the public transparency log directly to confirm the record for itself.</p>
 
-  <label for="receipt">Receipt (JSON)<span class="hint"> — optional; paste <code>{"leaf","index","binding_index"}</code> to auto-fill the fields below</span></label>
-  <textarea id="receipt" rows="3" placeholder='{"leaf":"...","index":0,"binding_index":0}'></textarea>
+  <div class="proves">
+    <span class="chip">✓ Signed record</span>
+    <span class="chip">✓ Published in the public log</span>
+    <span class="chip">✓ Tied to a real creator</span>
+    <span class="chip">✓ Your file matches</span>
+  </div>
 
-  <label for="leaf">Leaf (base64)<span class="hint"> — the canonical leaf bytes from the log record</span></label>
-  <textarea id="leaf" rows="4" placeholder="base64-encoded canonical leaf bytes"></textarea>
+  <details class="how-d">
+    <summary>How this works · what each check proves <span class="caret2">›</span></summary>
+    <div class="body">
+      <p>A creator certifies a work; that certification is written to a public, append-only
+        transparency log. This page verifies four things independently, in your browser:</p>
+      <p><b>Signature</b> — the record is cryptographically signed. <b>Published</b> — the record
+        is actually committed in the public log (not just shown to you). <b>Identity</b> — the
+        signing key resolves to a real creator. <b>Your file</b> — a file you hold matches the
+        certified work, exactly or as a consistent copy.</p>
+      <p>The WebAssembly verifier and the trust anchors are part of this page, not supplied by the
+        server — so the answer can’t be faked by whoever sent you here.</p>
+    </div>
+  </details>
 
-  <label for="media">Media file<span class="hint"> — optional; the work (.docx, .pdf, or .txt) you want to check against this attestation. Exact match is over the raw file bytes; fuzzy match is over text extracted locally.</span></label>
-  <input type="file" id="media" accept=".txt,.docx,.pdf,text/plain,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
+  <div class="rule"></div>
 
-  <label for="index">Log index<span class="hint"> — optional; from the receipt. Provide it to check log inclusion.</span></label>
-  <input type="number" id="index" min="0" step="1" placeholder="e.g. 0" />
+  <p class="status" id="status">Loading the verifier…</p>
 
-  <label for="binding_index">Binding index<span class="hint"> — optional; from the receipt. Provide it to resolve the creator identity.</span></label>
-  <input type="number" id="binding_index" min="0" step="1" placeholder="e.g. 0" />
+  <div class="ready" id="ready" style="display:none">
+    <div class="dot"></div>
+    <div class="t"><b>Record loaded from your link.</b> Add the file you want to check below, or
+      press Verify to confirm the record on its own.</div>
+  </div>
 
-  <fieldset>
-    <legend>Log configuration (the pinned trust anchors — part of this verifier, not taken from the server)</legend>
-    <label for="origin">Origin<span class="hint"> — the log's checkpoint name</span></label>
-    <input type="text" id="origin" placeholder="e.g. chain-of-creation" />
-    <label for="vkey">Checkpoint public key (note vkey)</label>
-    <input type="text" id="vkey" placeholder="origin+xxxxxxxx+Base64Key" />
-    <label for="idroot">Identity-root public key(s)<span class="hint"> — hex Ed25519; comma-separate a set for rotation</span></label>
-    <input type="text" id="idroot" placeholder="64-hex Ed25519 public key" />
-    <label for="baseurl">Read base URL</label>
-    <input type="text" id="baseurl" placeholder="https://chain.humancreator.com/" />
-  </fieldset>
+  <!-- Media file. The <input> keeps id="media" (script + drag-drop read it); the label is the drop zone. -->
+  <label class="drop" id="drop" for="media">
+    <div class="ic">⬆</div>
+    <div class="big" id="drop-title">Drop the file you want to check</div>
+    <div class="sub" id="drop-sub">or choose a file · .docx, .pdf, .txt · stays in your browser</div>
+    <input type="file" id="media"
+      accept=".txt,.docx,.pdf,text/plain,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+      style="display:none" />
+  </label>
 
-  <button id="verify" disabled>Verify</button>
+  <div class="actions">
+    <button id="verify" class="btn btn-primary" disabled>Verify authenticity</button>
+  </div>
 
-  <div id="output"></div>
+  <!-- Deep-link inputs: the receipt fragment fills these. No visible UI — the page is opened
+       from a work's Verify link. IDs preserved for the WASM verify + prefill contract. -->
+  <input type="hidden" id="receipt" />
+  <input type="hidden" id="leaf" />
+  <input type="hidden" id="index" />
+  <input type="hidden" id="binding_index" />
+  <div class="results"><div class="wrap-inner"><div id="output"></div></div></div>
 
-  <details>
+  <!-- Sealed trust anchors, shown just above the raw result. Editable inputs (same IDs) behind Advanced. -->
+  <div class="anchor">
+    <div class="top"><span>🔒</span> <span id="anchor-origin">Pinned trust anchors</span></div>
+    <div class="fp" id="anchor-fp">—</div>
+    <div class="note">These trust anchors are built into this page, not supplied by the server.
+      <details class="adv">
+        <summary>Advanced: use custom trust anchors</summary>
+        <label for="origin">Origin<span class="hint"> — the log's checkpoint name</span></label>
+        <input type="text" id="origin" placeholder="e.g. chain-of-creation" />
+        <label for="vkey">Checkpoint public key (note vkey)</label>
+        <input type="text" id="vkey" placeholder="origin+xxxxxxxx+Base64Key" />
+        <label for="idroot">Identity-root public key(s)<span class="hint"> — hex Ed25519; comma-separate for rotation</span></label>
+        <input type="text" id="idroot" placeholder="64-hex Ed25519 public key" />
+        <label for="baseurl">Read base URL</label>
+        <input type="text" id="baseurl" placeholder="https://chain.humancreator.com/" />
+      </details>
+    </div>
+  </div>
+
+  <details class="raw">
     <summary>Raw result (JSON)</summary>
     <pre id="raw">—</pre>
   </details>
+</div>
 
   <!-- wasm_exec.js is provided by the Go toolchain; build.sh copies it here. -->
   <script src="wasm_exec.js"></script>
@@ -81,17 +285,39 @@
     const btn = document.getElementById("verify");
     const output = document.getElementById("output");
     const raw = document.getElementById("raw");
+    const readyEl = document.getElementById("ready");
+    const dropEl = document.getElementById("drop");
+    const mediaEl = document.getElementById("media");
 
     // The pinned trust anchors live in config.json, fetched at load (a deployed
     // verifier ships it beside these assets; a local/mirrored copy without it
     // leaves the fields blank for manual entry). The verifier ALWAYS verifies the
     // checkpoint against this pinned key — never the key the server presents.
     // config.json is data, not code: this HTML + the wasm stay static and portable.
+    function shortHex(s){ if(!s) return "—"; return s.length<=16 ? s : s.slice(0,8)+"…"+s.slice(-6); }
+    function vkeyFingerprint(v){ // "origin+5a6e428e+Base64Key" -> "5a6e428e"
+      if(!v) return "—"; const parts = v.split("+"); return parts.length>=2 ? parts[1] : shortHex(v);
+    }
+    function renderAnchorCard(){
+      const origin = document.getElementById("origin").value.trim();
+      const vkey = document.getElementById("vkey").value.trim();
+      const idroot = document.getElementById("idroot").value.trim();
+      const titleEl = document.getElementById("anchor-origin");
+      const fpEl = document.getElementById("anchor-fp");
+      if(origin){
+        titleEl.textContent = "Pinned to " + origin;
+        fpEl.textContent = "checkpoint " + vkeyFingerprint(vkey) + " · identity-root " + shortHex(idroot);
+      } else {
+        titleEl.textContent = "No pinned anchors";
+        fpEl.textContent = "Set the log configuration under Advanced to enable inclusion + identity checks.";
+      }
+    }
     fetch("config.json").then((r) => r.ok ? r.json() : {}).catch(() => ({})).then((cfg) => {
       if (cfg.origin) document.getElementById("origin").value = cfg.origin;
       if (cfg.vkey) document.getElementById("vkey").value = cfg.vkey;
       if (cfg.idRoot) document.getElementById("idroot").value = cfg.idRoot;
       if (cfg.baseUrl) document.getElementById("baseurl").value = cfg.baseUrl;
+      renderAnchorCard();
     });
 
     // Pasting a receipt JSON auto-fills leaf / index / binding_index.
@@ -118,13 +344,49 @@
       el.dispatchEvent(new Event("input"));
     })();
 
+    // Show the "record loaded" summary when a link pre-filled the leaf.
+    (function readyState(){
+      readyEl.style.display = document.getElementById("leaf").value.trim() ? "flex" : "none";
+    })();
+
+    // Drop zone: reflect the chosen file, and accept drag-and-drop into #media.
+    function showChosenFile(){
+      const f = mediaEl.files[0];
+      const title = document.getElementById("drop-title");
+      const sub = document.getElementById("drop-sub");
+      if(f){
+        dropEl.classList.add("has-file");
+        title.textContent = f.name;
+        sub.textContent = "ready to check · click Verify, or choose a different file";
+      } else {
+        dropEl.classList.remove("has-file");
+        title.textContent = "Drop the file you want to check";
+        sub.textContent = "or choose a file · .docx, .pdf, .txt · stays in your browser";
+      }
+    }
+    mediaEl.addEventListener("change", showChosenFile);
+    ["dragenter","dragover"].forEach(ev => dropEl.addEventListener(ev, (e) => {
+      e.preventDefault(); dropEl.classList.add("drag");
+    }));
+    ["dragleave","drop"].forEach(ev => dropEl.addEventListener(ev, (e) => {
+      e.preventDefault(); dropEl.classList.remove("drag");
+    }));
+    dropEl.addEventListener("drop", (e) => {
+      const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+      if(!f) return;
+      const dt = new DataTransfer(); dt.items.add(f); mediaEl.files = dt.files;
+      showChosenFile();
+    });
+
     WebAssembly.instantiateStreaming(fetch("cocverify.wasm"), go.importObject)
       .then((res) => {
         go.run(res.instance);
-        status.textContent = "Ready. Paste a base64 leaf, optionally choose a media file and log index, then Verify.";
+        status.textContent = document.getElementById("leaf").value.trim()
+          ? "Ready. Add a file to check a copy, or press Verify to confirm the record."
+          : "Open this page from a work’s “Verify” link to load a record to check.";
         btn.disabled = false;
       })
-      .catch((err) => { status.textContent = "Failed to load WebAssembly: " + err; });
+      .catch((err) => { status.textContent = "Failed to load the verifier: " + err; });
 
     function fileToBase64(file) {
       return new Promise((resolve, reject) => {
@@ -205,107 +467,206 @@
       return parts.join("\n");
     }
 
-    function row(k, v, cls) {
-      return `<div class="row"><div class="k">${k}</div><div class="v ${cls || ""}">${v}</div></div>`;
+    // ---------- result model + rendering ----------
+    function krow(k, v, cls) {
+      return `<div class="krow"><div class="k">${k}</div><div class="v ${cls || ""}">${v}</div></div>`;
     }
 
-    function renderContent(c, extractNote) {
-      if (!c) {
-        return `<div class="banner">No media file provided — content was not checked. Choose the work file (.docx / .pdf / .txt) to test exact and fuzzy matches.</div>`;
+    // Signature / record head. Content preserved from the original renderHead.
+    function signatureCard(result) {
+      const sig = result.signature_valid
+        ? `<span class="tag g">✓ valid</span>` : `<span class="tag r">✗ invalid</span>`;
+      let h = `<div class="cardtitle">Signature</div>`;
+      h += krow("Leaf kind", result.kind, "plain");
+      h += krow("Signature", sig, "");
+      h += krow("Leaf hash", result.leaf_hash, "");
+      if (result.kind === "attestation") {
+        h += krow("Work ID", result.work_id || "—", "");
+        h += krow("Event", `seq ${result.event_seq || 0} · ${result.event_type || "—"}`, "plain");
+      } else if (result.kind === "identity_binding") {
+        h += krow("Creator ID", result.creator_id || "—", "");
       }
-      let html = row("Algorithm", c.algorithm_id || "—");
+      return h;
+    }
+
+    // Your-file (content) check. Copy preserved verbatim from the original renderContent.
+    function fileCard(c, extractNote) {
+      if (!c) {
+        return { state: "n", html:
+          `<div class="cardtitle">Your file</div>` +
+          `<div class="hint">No file provided — content was not checked. Add the work file
+            (.docx / .pdf / .txt) above to test exact and fuzzy matches.</div>` };
+      }
+      let html = `<div class="cardtitle">Your file</div>`;
+      html += krow("Algorithm", c.algorithm_id || "—", "");
+      let state, fileKind;
       if (c.exact_match) {
-        html += row("Exact match", "✓ byte-identical to the certified file", "strong");
+        state = "g"; fileKind = "exact";
+        html += krow("Exact match", "✓ byte-identical to the certified file", "tag g");
         html += `<div class="hint">Cryptographically strong (exact hash over the raw file bytes). This file IS the certified bytes.</div>`;
       } else {
-        html += row("Exact match", "✗ not byte-identical", "");
+        html += krow("Exact match", "✗ not byte-identical", "plain");
         if (extractNote) {
-          html += row("Fuzzy match", "not run", "");
+          state = "a"; fileKind = "skipped";
+          html += krow("Fuzzy match", "not run", "plain");
           html += `<div class="hint">Fuzzy comparison was skipped: ${extractNote}. The exact (byte-identical) check above still ran.</div>`;
         } else if (c.fuzzy_checked) {
           const within = c.fuzzy_match;
-          html += row("Fuzzy distance",
-            `${c.fuzzy_distance.toFixed(4)} (threshold ${c.fuzzy_threshold.toFixed(4)}) — ${within ? "within" : "above"} threshold`,
-            "advisory");
-          html += `<div class="hint">Advisory similarity, not proof. ${within
-            ? "This file is <em>consistent with</em> the certified work (e.g. a reformatted or re-encoded copy) — it does not prove it is the same work."
-            : "This file does not closely match; a fuzzy non-match does not prove it is a different work."}</div>`;
+          // A fuzzy distance of ~0 means identical normalized content (e.g. the same text in a
+          // different file format) — a strong (green) match, not merely advisory.
+          const identical = within && c.fuzzy_distance < 0.00005;
+          state = within ? (identical ? "g" : "a") : "r";
+          fileKind = within ? (identical ? "fuzzy0" : "fuzzy") : "fuzzyno";
+          const sim = (typeof c.fuzzy_distance === "number") ? (1 - c.fuzzy_distance) : null;
+          html += krow("Similarity",
+            `${sim !== null ? (sim * 100).toFixed(1) + "% · " : ""}${within ? "within" : "above"} threshold (distance ${c.fuzzy_distance.toFixed(4)} / ${c.fuzzy_threshold.toFixed(4)})`,
+            within ? (identical ? "tag g" : "tag a") : "tag r");
+          html += `<div class="hint">${identical
+            ? "Identical content to the certified work — the extracted text matches exactly. A different file format or minor formatting can still change the raw bytes, so this is a content match rather than byte-for-byte."
+            : "Advisory similarity, not proof. " + (within
+              ? "This file is <em>consistent with</em> the certified work (e.g. a reformatted or re-encoded copy) — it does not prove it is the same work."
+              : "This file does not closely match; a fuzzy non-match does not prove it is a different work.")}</div>`;
         } else if (c.note) {
-          html += row("Fuzzy", c.note, "");
+          state = "a"; fileKind = "fuzzy";
+          html += krow("Fuzzy", c.note, "plain");
+        } else {
+          state = "a"; fileKind = "fuzzy";
         }
       }
-      return `<div class="card">${html}</div>`;
+      return { state, fileKind, html };
     }
 
-    function renderHead(result) {
-      const sig = result.signature_valid
-        ? `<span class="ok">✓ valid</span>` : `<span class="bad">✗ invalid</span>`;
-      let head = row("Leaf kind", result.kind);
-      head += row("Signature", sig);
-      head += row("Leaf hash", result.leaf_hash);
-      if (result.kind === "attestation") {
-        head += row("Work ID", result.work_id || "—");
-        head += row("Event", `seq ${result.event_seq || 0} · ${result.event_type || "—"}`);
-      } else if (result.kind === "identity_binding") {
-        head += row("Creator ID", result.creator_id || "—");
-      }
-      return `<div class="card">${head}</div>`;
-    }
-
-    // Render the log-inclusion section. `inc` is the InclusionResult JSON, or null
-    // when inclusion was not attempted, or an {error} object on failure.
-    function renderInclusion(inc, attempted) {
+    // Log inclusion. Copy preserved from the original renderInclusion.
+    function inclusionCard(inc, attempted) {
+      let html = `<div class="cardtitle">Published in the log</div>`;
       if (!attempted) {
-        return `<div class="banner"><strong>Log inclusion not checked.</strong> Provide a log index and the log
-          configuration above to confirm this record is actually published in the transparency log.</div>`;
+        return { state: "n", html: html +
+          `<div class="hint"><b>Log inclusion not checked.</b> Provide a log index and the log
+            configuration to confirm this record is actually published in the transparency log.</div>` };
       }
       if (inc && inc.error) {
-        return `<div class="err"><strong>Inclusion check failed:</strong> ${inc.error}<br>
-          <span class="hint">A failure here means the checkpoint could not be verified against the pinned key,
-          or the log could not be reached — not that the record is necessarily absent.</span></div>`;
+        return { state: "a", html: html +
+          `<div class="hint"><b>Inclusion check could not complete:</b> ${inc.error}<br>
+            A failure here means the checkpoint could not be verified against the pinned key, or the log
+            could not be reached — not that the record is necessarily absent.</div>` };
       }
       if (inc.included) {
         const witness = inc.cosignatures > 0
           ? `${inc.cosignatures} cosignature(s) present (not verified by this build)`
           : `⚠ not yet witnessed — split-view protection is pending`;
-        return `<div class="good"><strong>✓ Included in the transparency log.</strong>
-          Leaf is committed at index ${inc.index} of a ${inc.tree_size}-entry tree, under a checkpoint signed by
-          <code>${inc.origin}</code>.<br><span class="hint">Witness status: ${witness}.</span></div>`;
+        return { state: "g", html: html +
+          krow("Included", "✓ committed at index " + inc.index, "tag g") +
+          krow("Log", `${inc.tree_size}-entry tree · checkpoint signed by <code>${inc.origin}</code>`, "plain") +
+          `<div class="hint">Witness status: ${witness}.</div>` };
       }
-      return `<div class="err"><strong>✗ NOT included.</strong> The leaf is not committed at index ${inc.index}
-        in the current ${inc.tree_size}-entry log (checkpoint signed by <code>${inc.origin}</code>). Treat this
-        record as unproven.</div>`;
+      return { state: "r", html: html +
+        krow("Included", "✗ NOT committed at index " + inc.index, "tag r") +
+        krow("Log", `${inc.tree_size}-entry tree · checkpoint signed by <code>${inc.origin}</code>`, "plain") +
+        `<div class="hint">Treat this record as unproven.</div>` };
     }
 
-    // Render the identity section. `id` is the IdentityResult JSON, null when not
-    // attempted, or an {error} object on failure.
-    function renderIdentity(id, attempted) {
+    // Identity resolution. Copy preserved from the original renderIdentity.
+    function identityCard(id, attempted) {
+      let html = `<div class="cardtitle">Creator identity</div>`;
       if (!attempted) {
-        return `<div class="banner"><strong>Identity not resolved.</strong> Provide a binding index and the
-          identity-root key to resolve the signing key to a creator.</div>`;
+        return { state: "n", html: html +
+          `<div class="hint"><b>Identity not resolved.</b> Provide a binding index and the
+            identity-root key to resolve the signing key to a creator.</div>` };
       }
       if (id && id.error) {
-        return `<div class="err"><strong>Identity check failed:</strong> ${id.error}</div>`;
+        return { state: "a", html: html + `<div class="hint"><b>Identity check could not complete:</b> ${id.error}</div>` };
       }
       if (id.resolved) {
         const kind = id.custodial
           ? "HII-custodial (HII holds the signing key)"
           : "self-managed (the creator holds the key)";
-        return `<div class="good"><strong>✓ Signer resolves to creator <code>${id.creator_id}</code>.</strong>
-          Key type: ${kind}. Resolved via an IdentityBinding committed at index ${id.binding_index}, signed by the
-          pinned identity root.<br><span class="hint">Proves HII vouched for this key→creator mapping at the
-          attestation's submission time and logged it.</span></div>`;
+        return { state: "g", html: html +
+          krow("Resolves to", id.creator_id, "") +
+          krow("Key type", kind, "plain") +
+          `<div class="hint">Resolved via an IdentityBinding committed at index ${id.binding_index}, signed by
+            the pinned identity root. Proves HII vouched for this key→creator mapping at the attestation's
+            submission time and logged it.</div>` };
       }
       const why = id.binding_included
         ? "the binding at that index does not authorize this signing key (or is signed by a non-pinned root)"
         : "the binding leaf at that index is not committed in the log";
-      return `<div class="err"><strong>✗ Identity not resolved.</strong> ${why}.</div>`;
+      return { state: "r", html: html +
+        krow("Resolves to", "✗ not resolved", "tag r") + `<div class="hint">${why}.</div>` };
+    }
+
+    // Similarity-check explainer, shown as an (i) after the "consistent copy" verdict.
+    const SIMILARITY_INFO = '<span class="info" tabindex="0" role="button" aria-label="What the similarity check means">i<span class="tip">The similarity check looks to see if the uploaded file is sufficiently similar to the certified file that they can reasonably be considered the same. This accounts for minor formatting differences or differing file types. For example: a doc and a pdf of the same content.</span></span>';
+
+    // Aggregate the per-check states into one honest verdict.
+    function computeHero(result, checks) {
+      const by = {}; checks.forEach(c => { by[c.key] = c.state; });
+      const fileCheck = checks.find(c => c.key === "file");
+      const fileKind = fileCheck ? fileCheck.fileKind : null;
+      const sig = by.signature, incl = by.published, idn = by.identity;
+
+      // Hard, definitive failures -> red.
+      if (sig === "r") return { s:"r", g:"✕", title:"Could not verify",
+        body:"The record’s signature is not valid — treat this record as unproven." };
+      if (incl === "r") return { s:"r", g:"✕", title:"Could not verify",
+        body:"This record is not committed in the public transparency log — treat it as unproven." };
+      if (idn === "r") return { s:"r", g:"✕", title:"Identity not resolved",
+        body:"The record is not tied to a creator identity at the binding you provided." };
+
+      const inclProven = incl === "g";
+      const idProven = (result.kind !== "attestation") || idn === "g";
+      const inconclusive = incl === "a" || idn === "a";
+      const recordProven = inclProven && idProven && !inconclusive;
+
+      if (recordProven) {
+        const consistentBody = "This record is signed, published in the public log, and tied to a real creator. Your file is a consistent copy of the certified work, not the exact certified bytes. " + SIMILARITY_INFO;
+        if (fileKind === "exact") return { s:"g", g:"✓", title:"Authentic",
+          body:"This record is signed, published in the public log, and tied to a real creator — and your file is a byte-exact match of the certified work." };
+        if (fileKind === "fuzzy0") return { s:"g", g:"✓", title:"Verified record — a consistent copy", body: consistentBody };
+        if (fileKind === "fuzzy") return { s:"a", g:"◈", title:"Verified record — a consistent copy", body: consistentBody };
+        if (fileKind === "fuzzyno") return { s:"a", g:"◈", title:"Authentic record — your file does not match",
+          body:"This record is verified, but the file you provided does not match the certified work." };
+        if (fileKind === "skipped") return { s:"a", g:"◈", title:"Verified record — file not fully checked",
+          body:"This record is signed, published in the public log, and tied to a real creator. The exact byte check ran, but the file’s text could not be read for a similarity check." };
+        return { s:"g", g:"✓", title:"Verified record",
+          body:"This record is signed, published in the public log, and tied to a real creator. Add a file above to check a copy against it." };
+      }
+
+      const missing = [];
+      if (!inclProven) missing.push("log inclusion");
+      if (result.kind === "attestation" && !idProven) missing.push("creator identity");
+      const because = inconclusive ? " (the log could not be reached — this is inconclusive, not a failure)" : "";
+      return { s:"a", g:"◈", title:"Signature valid — not fully verified",
+        body:`The record’s signature checks out, but ${missing.join(" and ")} ${missing.length>1?"were":"was"} not confirmed${because}. Provide the log configuration under Advanced to complete the check.` };
+    }
+
+    function renderResults(result, checks) {
+      const hero = computeHero(result, checks);
+      const now = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+      let html = `<div class="verdict ${hero.s} reveal">
+        <div class="glyph">${hero.g}</div>
+        <div>
+          <h2>${hero.title}</h2>
+          <p>${hero.body}</p>
+          <div class="meta">computed on your device · offline · ${now}</div>
+        </div>
+      </div>`;
+
+      let cells = "";
+      checks.forEach((c, i) => {
+        cells += `<div class="cell reveal"><div class="rail-col"><div class="link ${c.state}">${i + 1}</div></div>` +
+          `<div class="kcard ${c.state}">${c.html}</div></div>`;
+      });
+      html += `<div class="result">${cells}</div>`;
+      return html;
     }
 
     btn.addEventListener("click", async () => {
       const leaf = document.getElementById("leaf").value.trim();
-      if (!leaf) { output.innerHTML = `<div class="err">Paste a base64 leaf first.</div>`; return; }
-      const file = document.getElementById("media").files[0];
+      if (!leaf) {
+        output.innerHTML = `<div class="err-box"><b>No record to verify.</b> Open this page from a work’s “Verify” link.</div>`;
+        return;
+      }
+      const file = mediaEl.files[0];
       const indexStr = document.getElementById("index").value.trim();
       const bindingIdxStr = document.getElementById("binding_index").value.trim();
       const origin = document.getElementById("origin").value.trim();
@@ -315,7 +676,7 @@
       // the verifier and the read path).
       const baseUrl = document.getElementById("baseurl").value.trim() || window.location.origin;
 
-      output.innerHTML = `<p class="status">Verifying…</p>`;
+      output.innerHTML = `<p class="status" style="margin-top:24px">Verifying…</p>`;
       let extractNote = null;
       try {
         // Exact hash needs the RAW file bytes; fuzzy needs the extracted text.
@@ -325,7 +686,7 @@
         if (file) {
           rawB64 = await fileToBase64(file);
           try {
-            output.innerHTML = `<p class="status">Extracting text…</p>`;
+            output.innerHTML = `<p class="status" style="margin-top:24px">Reading your file locally…</p>`;
             textB64 = utf8ToBase64(await extractText(file));
           } catch (e) {
             extractNote = String((e && e.message) || e);
@@ -339,47 +700,51 @@
         raw.textContent = JSON.stringify(result, null, 2);
 
         if (result.error) {
-          output.innerHTML = `<div class="err"><strong>Error:</strong> ${result.error}</div>`;
+          output.innerHTML = `<div class="err-box"><b>Error:</b> ${result.error}</div>`;
           return;
         }
-
-        let body = renderHead(result);
-        if (result.kind === "attestation") body += renderContent(result.content, extractNote);
 
         // Log inclusion (async, needs network + the pinned config).
         let inc = null;
         const wantInclusion = indexStr !== "" && origin && vkey;
         if (wantInclusion) {
-          output.innerHTML = body + `<p class="status">Checking log inclusion…</p>`;
+          output.innerHTML = `<p class="status" style="margin-top:24px">Checking the public log…</p>`;
           try {
             inc = JSON.parse(await cocVerifyInclusion(leaf, Number(indexStr), baseUrl, origin, vkey));
           } catch (e) {
             inc = { error: String(e) };
           }
-          body += renderInclusion(inc, true);
-        } else {
-          body += renderInclusion(null, false);
         }
 
         // Identity resolution (attestations only; needs binding index + identity root).
         let id = null;
         const wantIdentity = result.kind === "attestation" && bindingIdxStr !== "" && idRoot && origin && vkey;
         if (wantIdentity) {
-          output.innerHTML = body + `<p class="status">Resolving creator identity…</p>`;
+          output.innerHTML = `<p class="status" style="margin-top:24px">Resolving creator identity…</p>`;
           try {
             id = JSON.parse(await cocVerifyIdentity(leaf, Number(bindingIdxStr), baseUrl, origin, vkey, idRoot));
           } catch (e) {
             id = { error: String(e) };
           }
-          body += renderIdentity(id, true);
-        } else if (result.kind === "attestation") {
-          body += renderIdentity(null, false);
+        }
+
+        // Build the ordered custody chain.
+        const checks = [{ key: "signature", state: result.signature_valid ? "g" : "r", html: signatureCard(result) }];
+        if (result.kind === "attestation") {
+          const fc = fileCard(result.content, extractNote);
+          checks.push({ key: "file", state: fc.state, fileKind: fc.fileKind, html: fc.html });
+        }
+        const ic = inclusionCard(inc, wantInclusion);
+        checks.push({ key: "published", state: ic.state, html: ic.html });
+        if (result.kind === "attestation") {
+          const idc = identityCard(id, wantIdentity);
+          checks.push({ key: "identity", state: idc.state, html: idc.html });
         }
 
         raw.textContent = JSON.stringify({ leaf: result, inclusion: inc, identity: id }, null, 2);
-        output.innerHTML = body;
+        output.innerHTML = renderResults(result, checks);
       } catch (e) {
-        output.innerHTML = `<div class="err"><strong>Error:</strong> ${e}</div>`;
+        output.innerHTML = `<div class="err-box"><b>Error:</b> ${e}</div>`;
       }
     });
   </script>
