@@ -12,8 +12,8 @@ require (
 	github.com/transparency-dev/merkle v0.0.2
 	github.com/transparency-dev/tessera v1.0.2
 	github.com/zeebo/blake3 v0.2.4
-	golang.org/x/mod v0.33.0
-	golang.org/x/text v0.34.0
+	golang.org/x/mod v0.37.0
+	golang.org/x/text v0.39.0
 )
 
 require (
@@ -48,6 +48,6 @@ require (
 	go.opentelemetry.io/otel/trace v1.40.0 // indirect
 	golang.org/x/crypto v0.48.0 // indirect
 	golang.org/x/exp v0.0.0-20240325151524-a685a6edb6d8 // indirect
-	golang.org/x/sync v0.19.0 // indirect
+	golang.org/x/sync v0.21.0 // indirect
 	k8s.io/klog/v2 v2.130.1 // indirect
 )
