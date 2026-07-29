@@ -2,9 +2,12 @@
 
 This document is the **public contract** for independently verifying a
 chain-of-creation record. It describes the byte-exact formats and algorithms a
-third party needs to check a leaf on their own — by reading our open reference
-implementation (`pkg/cocverify`, compiled to WebAssembly in `web/`), porting it,
-or auditing it.
+third party needs to check a leaf on their own, and it is **self-contained**: every
+algorithm is specified here in enough detail to implement without reading HII code.
+HII's reference implementation (`pkg/cocverify`, compiled to WebAssembly for the hosted
+verifier) is not currently published — it is available on request, and auditing it is an
+alternative to porting, never a prerequisite. The pinned trust anchors needed for §8 and
+§9 **are** published; see **§11**.
 
 > **Scope of this version.** This spec covers **leaf parsing, Ed25519 signatures,
 > content matching** (exact hash + fuzzy digest), **log-inclusion proofs** (§8), and
@@ -44,7 +47,6 @@ shapes:
   string is encoded as `var` over its UTF-8 bytes.
 
 A decoder reads fields in order and must reject trailing bytes (strict round-trip).
-Reference: `internal/leaf/codec.go`.
 
 ## 3. Leaf formats
 
@@ -52,7 +54,7 @@ A leaf begins with a `u8` **kind tag**: `1` = Attestation, `2` = IdentityBinding
 
 ### 3.1 Attestation (kind = 1)
 
-Provenance event for a work. Marshaled field order (`internal/leaf/attestation.go`):
+Provenance event for a work. Marshaled field order:
 
 | # | Field | Shape | Notes |
 |---|-------|-------|-------|
@@ -77,7 +79,7 @@ event references this value in field 5.
 
 ### 3.2 IdentityBinding (kind = 2)
 
-HII-signed mapping from a signing key to a creator (`internal/leaf/binding.go`):
+HII-signed mapping from a signing key to a creator:
 
 | # | Field | Shape |
 |---|-------|-------|
@@ -116,11 +118,25 @@ names the algorithm** used:
 
 - **`blake3`** (or empty ⇒ blake3): `BLAKE3-256(media_bytes)`. Used by the server-side
   media-digest path.
-- **`sha256`**: `SHA-256(file_bytes)`. Used by HII's file-based certifiers (e.g. the Word
-  add-in) which hash the **raw certified file bytes** (the exact `.docx`), because that is
-  the artifact the creator holds. A match therefore proves the candidate is the
-  byte-identical certified **file** — not merely the same text (a re-export or reformat
-  changes the bytes and will not exact-match; use the fuzzy digest for that).
+- **`sha256`**: `SHA-256(...)` over one of **two different subjects**, depending on which
+  certifier issued the leaf. `ExactAlg` alone does not tell them apart — see the warning
+  below.
+  - **Raw file bytes.** File-based certifiers (the Word add-in) hash the **exact certified
+    file** (the `.docx`), because that is the artifact the creator holds. A match proves
+    the candidate is the byte-identical certified **file** — not merely the same text; a
+    re-export or reformat changes the bytes and will not match.
+  - **Canonical normalized text.** Text-based certifiers (the Google Docs extension) hash
+    the **normalized token stream** defined by §6.3 steps 1–5, joined with single spaces —
+    i.e. `SHA-256(canonical_text)`, *not* the raw extracted text. This is deliberately
+    reproducible by anyone holding the document: they need the normalization, not HII's
+    extraction. Case, whitespace, quote style and punctuation do not affect it.
+
+> **Warning — the subject is not carried in the leaf.** Two leaves can both say
+> `ExactAlg: sha256` and commit to different things. Hashing raw text against a
+> file-bytes leaf, or raw text against a normalized-text leaf, produces a mismatch that
+> looks exactly like tampering. A verifier that cannot determine the subject MUST report
+> "cannot check" rather than "does not match". HII's verification API exposes the subject
+> explicitly as `exact_hash_subject`.
 
 A verifier recomputes the hash named by `ExactAlg` over the candidate bytes and compares.
 Both BLAKE3 and SHA-256 are published standards with independent implementations, so this
@@ -154,7 +170,7 @@ resolvable for older leaves; `phash-dct-64` (§6.2) covers images.
    `0`). Bit `i` occupies value `1 << i`.
 6. Serialize the 64-bit fingerprint **big-endian** into 8 bytes.
 
-**Threshold:** `0.15` (≤ 9 differing bits). Reference: `internal/fuzzy/simhash.go`.
+**Threshold:** `0.15` (≤ 9 differing bits).
 
 ### 6.2 `phash-dct-64` (photo, digital-art)
 
@@ -173,7 +189,7 @@ resolvable for older leaves; `phash-dct-64` (§6.2) covers images.
    otherwise dominate): sort the 63 remaining values, take element `63/2 = 31`.
 6. Fingerprint bit `i` = `1` iff `block[i] > median`. Serialize **big-endian**.
 
-**Threshold:** `0.1875` (≤ 12 differing bits). Reference: `internal/fuzzy/phash.go`.
+**Threshold:** `0.1875` (≤ 12 differing bits).
 
 > **Known limitation (re-implementers).** This hash uses floating-point DCT and
 > median comparison. An *independent* implementation may differ by one or two bits
@@ -211,8 +227,7 @@ mutually-incompatible variants (x86_32 vs x64_128, seed/sign handling); SHA-256 
 exactly one definition in every language, so a third party reproduces this digest with
 only their standard library — no HII code, no variant ambiguity.
 
-**Threshold:** `0.15` (≤ 9 differing bits). Reference: `internal/fuzzy/simhash64.go`;
-golden vectors in `spec/simhash64-vectors.json`.
+**Threshold:** `0.15` (≤ 9 differing bits). Golden vectors: §7.
 
 > **Extraction note (re-implementers).** The fingerprint is defined over **text**. When
 > the certified work is a binary document (`.docx`, `.pdf`), the ledger digest was computed
@@ -223,15 +238,14 @@ golden vectors in `spec/simhash64-vectors.json`.
 
 ## 7. Golden vectors
 
-Any conforming implementation MUST reproduce these digests exactly. They are also
-asserted in `internal/fuzzy/golden_test.go`; the image inputs are the committed files
-under `internal/fuzzy/testdata/`.
+Any conforming implementation MUST reproduce these digests exactly. They are also asserted by HII's own test
+suites; the image inputs are fixed files, available on request.
 
 ### `simhash64-v1`
 
-The canonical vectors live in `spec/simhash64-vectors.json` — the single source of truth
-that the coc verifier **and** every HII certifier (customer-app, Word add-in, gdoc
-extension) reproduce byte-for-byte in their own test suites.
+The vectors below are the single source of truth that the coc verifier **and** every HII
+certifier (customer-app, Word add-in, gdoc extension) reproduce byte-for-byte in their own
+test suites. A machine-readable copy is available on request.
 
 | Input (exact UTF-8) | Digest (hex, big-endian) |
 |---------------------|--------------------------|
@@ -260,7 +274,7 @@ identically — that reformatting-invariance is the point of the fuzzy digest.
 
 ### `phash-dct-64`
 
-| Input file (`internal/fuzzy/testdata/`) | Digest (hex, big-endian) |
+| Input file | Digest (hex, big-endian) |
 |-----------------------------------------|--------------------------|
 | `gradient-a.png` | `f8f8f8f8f8070605` |
 | `gradient-a.jpg` (same image, JPEG q40) | `f8f8f8f8f8070605` |
@@ -300,7 +314,7 @@ The checkpoint is a [note](https://pkg.go.dev/golang.org/x/mod/sumdb/note):
 ```
 
 A verifier MUST verify the checkpoint signature against a **pinned** `(origin, vkey)`
-that ships with the verifier (published below / baked into the distribution) — **never**
+that ships with the verifier (**§11**, or baked into the distribution) — **never**
 a key taken from the response. The pinned vkey is the trust anchor; an unverifiable
 checkpoint is a hard failure, never a silent pass. Witness cosignatures, when a witness
 quorum is live, are verified against the published witness policy; until then the log
@@ -322,7 +336,7 @@ Given the record's `{leaf, index}` (the index is returned in the submit receipt)
 
 A verifier reproduces this with the Tessera client (`client.FetchCheckpoint`,
 `client.NewProofBuilder(...).InclusionProof`) over any fetcher, or an equivalent port.
-Reference: `pkg/cocverify/inclusion.go`; the browser export is
+The hosted verifier exposes this as
 `cocVerifyInclusion(leafB64, index, readBaseURL, origin, vkey)`.
 
 ### 8.4 What inclusion does and does not prove
@@ -357,9 +371,9 @@ the attestation's `SignerPubKey`, so a bad pointer simply fails to resolve.
 
 ### 9.2 Second pinned anchor — the identity root
 
-The verifier pins the HII **identity-root public key(s)** (hex Ed25519), separately
-from the checkpoint key, and accepts a *set* for rotation (bindings issued by a
-rotated-out root stay verifiable, optionally up to a cutoff).
+The verifier pins the HII **identity-root public key(s)** (hex Ed25519, published in
+**§11**), separately from the checkpoint key, and accepts a *set* for rotation (bindings
+issued by a rotated-out root stay verifiable, optionally up to a cutoff).
 
 ### 9.3 Procedure
 
@@ -378,8 +392,7 @@ Given the attestation and `binding_index`:
    the greatest `ValidFrom` not after `SubmittedAt` wins.
 
 The result reports the `CreatorID`, the `KeyType` (HII-custodial vs self-managed), and
-that the binding was proven included. Reference: `pkg/cocverify/identity.go`; the
-browser export is
+that the binding was proven included. The hosted verifier exposes this as
 `cocVerifyIdentity(leafB64, bindingIndex, readBaseURL, origin, checkpointVkey, identityRootsHex)`.
 
 ### 9.4 Semantics and scope
@@ -401,3 +414,81 @@ change** to this contract: it requires a new `AlgorithmID` (and a new spec revis
 never an in-place edit. Stored leaves keep verifying against the version named in their
 `AlgorithmID`. `ExactHash` is accompanied by `ExactAlg` (`blake3` default, or `sha256`);
 adding a new exact-hash algorithm is likewise a versioned change.
+
+## 11. Trust anchors
+
+Sections 8 and 9 require anchors that a verifier **pins** rather than reads from a
+response. They are published as `config.json` on each environment's verifier
+distribution, which is also the log's read base URL:
+
+```
+GET <read base URL>/config.json
+{"origin": "...", "vkey": "...", "idRoot": "...", "baseUrl": ""}
+```
+
+`baseUrl` is empty by convention: the hosted verifier is served from the same
+distribution as the read path, so it defaults to its own origin. A third-party verifier
+substitutes the read base URL below.
+
+### 11.1 Production
+
+| | |
+|---|---|
+| read base URL | `https://d3kztzkiozolaa.cloudfront.net` |
+| `origin` | `chain.humancreator.com` |
+| `vkey` | `chain.humancreator.com+5a6e428e+AW3IP9XX0NZXoNfAeTY7Q4t4skSULvhfFAIJBzaEtv9y` |
+| `idRoot` | `bc0035e0c7f441a5673fae1c4d5b02dfef460b61eeda535a3c8ac3ed624ff0df` |
+
+### 11.2 Development
+
+| | |
+|---|---|
+| read base URL | `https://d2nocngkolfsh0.cloudfront.net` |
+| `origin` | `chain-of-creation` |
+| `vkey` | `chain-of-creation+5a24a178+AVdcdlg+PJyuS+QRkxACp1+Osfgq29yoZO5jHJvRxwY7` |
+| `idRoot` | `48b0ef7bcfd7af6811518397c562382c4841cf7a0c4f86124bc1a46a1e3355a1` |
+
+### 11.3 The origin is a name, not a URL
+
+**`origin` is the checkpoint's note name and is NOT the read endpoint.** In production it
+*looks* like a hostname — `chain.humancreator.com` — but that host serves the submit API,
+not the tlog-tiles read path, and a verifier that derives a URL from it will fail to
+connect. Always fetch `/checkpoint` and `/tile/...` from the read base URL above.
+
+### 11.4 Fetching the anchors is a bootstrap, not a verification
+
+Reading `config.json` over TLS establishes the anchors on first use; from then on they
+must be **pinned**. A verifier that re-fetches them per verification has replaced
+cryptographic pinning with trust in whoever serves that file, and gains nothing over
+trusting HII's API directly. Pin the values; treat a change as an event to investigate.
+
+### 11.5 Witnessing status
+
+At the time of writing both logs report **zero witness cosignatures**. Checkpoint
+signature verification against the pinned key therefore proves the log's own commitment,
+but split-view/equivocation protection is **not** yet in force (§8.2, §8.4). A verifier
+should report this rather than imply otherwise.
+
+## Appendix A. Implementation index (internal)
+
+The sections above deliberately contain no source-tree paths: this document is published
+externally, and a reader outside HII cannot open them. The mapping is preserved here for
+HII engineers.
+
+| Spec section | Implementation |
+|---|---|
+| §2 Encoding primitives | `internal/leaf/codec.go` |
+| §3.1 Attestation | `internal/leaf/attestation.go` |
+| §3.2 IdentityBinding | `internal/leaf/binding.go` |
+| §6.1 `simhash-text-v1` | `internal/fuzzy/simhash.go` |
+| §6.2 `phash-dct-64` | `internal/fuzzy/phash.go` |
+| §6.3 `simhash64-v1` | `internal/fuzzy/simhash64.go` |
+| §7 Golden vectors | `spec/simhash64-vectors.json`, `internal/fuzzy/golden_test.go`, `internal/fuzzy/testdata/` |
+| §8 Log inclusion | `pkg/cocverify/inclusion.go` |
+| §9 Identity resolution | `pkg/cocverify/identity.go` |
+| §11 Trust anchors | `cmd/hiipub` derives them; served as `config.json` |
+
+**When editing this document, keep it publication-ready:** put source paths here, not in
+the body. The published HTML is generated verbatim from this file
+(`customer-app/scripts/build-verification-spec-html.py`), so anything added to the body
+ships to the public page.
