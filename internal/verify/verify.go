@@ -42,12 +42,27 @@ type ContentMatch struct {
 }
 
 // EventReport is the per-event slice of a work report.
+//
+// Signature and Identity are structural findings and stay true regardless of
+// Verdict: an entry that was validly signed and provably logged remains so even
+// after HII withdraws it. Only Verdict expresses whether HII still stands behind
+// it. See docs/verification-spec.md §12.
 type EventReport struct {
 	LeafHashHex string          `json:"leaf_hash"`
 	EventSeq    uint64          `json:"event_seq"`
 	EventType   string          `json:"event_type"`
 	Signature   SignatureResult `json:"signature"`
 	Identity    IdentityResult  `json:"identity"`
+
+	Verdict   string           `json:"verdict"`
+	Withdrawn *WithdrawnDetail `json:"withdrawn"`
+}
+
+// WithdrawnDetail describes an entry HII has withdrawn.
+type WithdrawnDetail struct {
+	At              uint64 `json:"at"`
+	Reason          string `json:"reason"`
+	ArtifactVersion uint64 `json:"artifact_version"`
 }
 
 // ChainReport summarizes structural integrity.

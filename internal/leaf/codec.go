@@ -21,6 +21,7 @@ type LeafKind uint8
 const (
 	KindAttestation     LeafKind = 1
 	KindIdentityBinding LeafKind = 2
+	KindStatusAnchor    LeafKind = 3
 )
 
 // encoder builds a canonical byte string. Integers are big-endian; variable

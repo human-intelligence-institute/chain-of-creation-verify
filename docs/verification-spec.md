@@ -1,4 +1,4 @@
-# chain-of-creation — Verification Specification (v1)
+# chain-of-creation — Verification Specification (v1.1)
 
 This document is the **public contract** for independently verifying a
 chain-of-creation record. It describes the byte-exact formats and algorithms a
@@ -10,12 +10,14 @@ alternative to porting, never a prerequisite. The pinned trust anchors needed fo
 §9 **are** published; see **§11**.
 
 > **Scope of this version.** This spec covers **leaf parsing, Ed25519 signatures,
-> content matching** (exact hash + fuzzy digest), **log-inclusion proofs** (§8), and
-> **identity resolution** (mapping a signing key to a creator, §9). A passing
-> content+signature check means "this leaf is well-formed, correctly signed, and
-> your file matches it"; the §8 inclusion check proves the leaf is **committed in
-> the published log**; the §9 identity check proves **which creator HII vouched the
-> signing key for** at submission time.
+> content matching** (exact hash + fuzzy digest), **log-inclusion proofs** (§8),
+> **identity resolution** (mapping a signing key to a creator, §9), and
+> **revocation status** (§12). A passing content+signature check means "this leaf is
+> well-formed, correctly signed, and your file matches it"; the §8 inclusion check
+> proves the leaf is **committed in the published log**; the §9 identity check proves
+> **which creator HII vouched the signing key for** at submission time; the §12 status
+> check reports whether **HII has since withdrawn** the certification. A verifier must
+> perform §12 before presenting a record as verified.
 
 ## 1. Trust model — what each check is worth
 
@@ -50,7 +52,9 @@ A decoder reads fields in order and must reject trailing bytes (strict round-tri
 
 ## 3. Leaf formats
 
-A leaf begins with a `u8` **kind tag**: `1` = Attestation, `2` = IdentityBinding.
+A leaf begins with a `u8` **kind tag**: `1` = Attestation, `2` = IdentityBinding,
+`3` = StatusAnchor. Kinds are **additive**: a reader that does not recognise a tag
+skips the leaf, and leaves written before a kind existed keep decoding unchanged.
 
 ### 3.1 Attestation (kind = 1)
 
@@ -91,6 +95,29 @@ HII-signed mapping from a signing key to a creator:
 | 6 | IssuerPubKey | `fixed(32)` (HII identity-root key) |
 | 7 | IssuerSignature | `fixed(64)` |
 
+### 3.3 StatusAnchor (kind = 3)
+
+HII-signed commitment to the hash of a published **revocation status artifact**
+(§12). The artifact lists attestation leaves HII has withdrawn.
+
+| # | Field | Shape | Notes |
+|---|-------|-------|-------|
+| 1 | kind | `u8` | `3` |
+| 2 | SchemaVersion | `u32` | |
+| 3 | ArtifactVersion | `u64` | strictly monotonic across publications |
+| 4 | ArtifactHash | `fixed(32)` | BLAKE3-256 over the artifact bytes **as published** |
+| 5 | IssuedAt | `u64` | unix milliseconds |
+| 6 | IssuerPubKey | `fixed(32)` | HII identity-root key — the anchor already pinned for §3.2 |
+| 7 | IssuerSignature | `fixed(64)` | Ed25519 over the signing payload (§4) |
+
+`ArtifactVersion` is inside the signed payload deliberately: without it, an old
+artifact's signature could be replayed under a higher version number and the
+status rolled back undetectably.
+
+The artifact itself carries **no signature of its own**. Its authenticity is
+transitive from this leaf, which is both signed and committed to the append-only
+log — one signature, in one place, covered by the log's tamper-evidence.
+
 ## 4. Signatures (Ed25519)
 
 Signatures are **domain-separated**: the payload begins with a `var` domain string so
@@ -110,6 +137,12 @@ empty. Verify with `Ed25519.Verify(SignerPubKey, payload, Signature)`.
 **IdentityBinding signing payload** (domain `coc-identity-binding-v1`), in order:
 `domain (var)`, `CreatorID (var)`, `AuthorizedKey (fixed32)`, `KeyType (u8)`,
 `ValidFrom (u64)`, `IssuerPubKey (fixed32)`. Verify against `IssuerSignature`.
+
+**StatusAnchor signing payload** (domain `coc-status-v1`), in order:
+`domain (var)`, `SchemaVersion (u32)`, `ArtifactVersion (u64)`,
+`ArtifactHash (fixed32)`, `IssuedAt (u64)`, `IssuerPubKey (fixed32)`. Verify
+against `IssuerSignature`. The distinct domain is what stops a status signature
+being replayed as an IdentityBinding, given both are made with the identity-root key.
 
 ## 5. Content hashing
 
@@ -283,6 +316,31 @@ identically — that reformatting-invariance is the point of the fuzzy digest.
 The PNG and JPEG of the same image hash identically (distance 0) despite lossy
 recompression; the different image is far away (`distance(a,b) = popcount(f8f8f8f8f8070605 ⊕ 2d126d926d2d936d)/64`).
 
+### Revocation (§12)
+
+Derived from the Ed25519 seed
+`0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20`, giving the
+identity root
+`79b5562e8fe654f94078b112e8a98ba7901f853ae695bed7e0e3910bad049664`.
+
+Status artifact (exact bytes — these are what get hashed):
+
+```
+{"issued_at":1786000000000,"log_size_at_issue":9,"schema":1,"version":1,"withdrawn":[{"leaf_hash":"oKGio6SlpqeoqaqrrK2ur6ChoqOkpaanqKmqq6ytrq8=","reason":"certification_rejected","withdrawn_at":1786000000001}]}
+```
+
+| Value | Expected |
+|-------|----------|
+| `ArtifactHash` (BLAKE3-256 of the bytes above) | `b6cd453b16d99761862fa3f1ed7c8d50f121135596fef2595ff7015fb4a30f36` |
+| `StatusAnchor` leaf, base64 | `AwAAAAEAAAAAAAAAAbbNRTsW2Zdhhi+j8e18jVDxIRNVlv7yWV/3AV+0ow82AAABn9XlRAB5tVYuj+ZU+UB4sRLoqYunkB+FOuaVvtfg45ELrQSWZMmdoBLEMzgo8+2iCMuu8X34SCrHV9RC4Fpwa9zYefMovoYx07ehBgTi+wScWOcqi2LBtQtzTEDo7uvssGxaPQ4=` |
+| Verdict for leaf hash `oKGio6SlpqeoqaqrrK2ur6ChoqOkpaanqKmqq6ytrq8=` | **`WITHDRAWN`** |
+| Verdict for any other leaf hash | `VERIFIED` |
+| Verdict when the artifact is unreachable or its hash differs | **`INDETERMINATE`** |
+
+An implementation that omits status resolution returns `VERIFIED` for the third
+row and fails this vector. That is deliberate: conformance to §12 has to be
+demonstrable, not merely claimed.
+
 ## 8. Log inclusion
 
 The checks above prove a leaf is well-formed, signed, and matches a file. Inclusion
@@ -405,9 +463,26 @@ proving **no binding exists** for a key (non-membership), is not covered here �
 needs a verifiable key→binding map (key-transparency), a **future** capability,
 deliberately not built while records carry their own binding.
 
+The same framing governs **certification status**. A leaf attests that HII made a
+statement at time T; it does not assert that HII still stands behind it. An entry
+whose certification was later rejected therefore remains a correct historical
+record, and the log is not wrong to contain it. What must not happen is a verifier
+reporting such an entry as plainly verified — that is a presentation error, not a
+log error, and §12 specifies how to avoid it.
+
 ## 10. Versioning
 
-This spec is **v1**, matching `AlgorithmID` values `simhash64-v1` (canonical text),
+This spec is **v1.1**. Revision 1.1 adds the `StatusAnchor` leaf (§3.3) and
+revocation status (§12).
+
+Leaf kinds are **additive** and not a breaking change: every leaf written under v1
+decodes unchanged, and a v1 reader skips unrecognised kinds. The **verifier verdict
+is** a breaking change — results now carry `VERIFIED` / `WITHDRAWN` / `INDETERMINATE`
+rather than a bare pass, and a consumer reading only a boolean will over-claim on a
+withdrawn record. That was the point of the change, so it is deliberate rather than
+incidental.
+
+The v1 content rules below are unchanged, matching `AlgorithmID` values `simhash64-v1` (canonical text),
 `simhash-text-v1` (legacy text), and `phash-dct-64` (image). Any change to normalization,
 tokenization, hashing, bit ordering, thresholds, or the leaf wire format is a **breaking
 change** to this contract: it requires a new `AlgorithmID` (and a new spec revision),
@@ -469,6 +544,95 @@ signature verification against the pinned key therefore proves the log's own com
 but split-view/equivocation protection is **not** yet in force (§8.2, §8.4). A verifier
 should report this rather than imply otherwise.
 
+## 12. Revocation and status
+
+A transparency log is append-only, so HII cannot withdraw a record by deleting it.
+Withdrawal is expressed as an **additional statement about** a leaf, never a
+mutation of it.
+
+### 12.1 The status artifact
+
+HII publishes a JSON document listing withdrawn attestation leaves, addressed by
+version at `<read base URL>/status/v<N>.json`. Being version-addressed, each is
+immutable and may be cached indefinitely.
+
+```json
+{"issued_at":<u64 ms>,"log_size_at_issue":<u64>,"schema":1,"version":<u64>,
+ "withdrawn":[{"leaf_hash":"<base64 32B>","reason":"<enum>","withdrawn_at":<u64 ms>}]}
+```
+
+`leaf_hash` is the **BLAKE3 `LeafHash`** — the content hash over the marshaled leaf
+that §3.1 field 5 uses for chaining. It is **not** the RFC6962 tree leaf hash of
+§8.3; the two are deliberately distinct and must not be interchanged.
+
+`reason` is a coarse enum (`certification_rejected`, `certification_withdrawn`,
+`work_deleted`) and carries no case detail.
+
+A verifier **MUST** hash the artifact bytes **exactly as received** and **MUST NOT**
+re-serialise the JSON before hashing.
+
+### 12.2 Discovery
+
+The newest `StatusAnchor` (§3.3) in the log is authoritative. A hint at
+`<read base URL>/status/latest.json` (`{"version":N,"anchor_index":I}`) may be used
+as a **starting point only**; it is untrusted.
+
+A verifier:
+
+1. Fetches and verifies the checkpoint (§8.2) → tree `size`.
+2. Scans entry bundles from the hinted index to `size` for `kind = 3` leaves,
+   taking the one with the greatest `ArtifactVersion` whose `IssuerSignature`
+   verifies against a **pinned** identity root (§11). Scanning to the tip — rather
+   than trusting the hint — is what prevents a stale or dishonest hint from
+   concealing a newer anchor.
+3. If the hint is missing, unparseable, out of range, or names a leaf that is not a
+   `StatusAnchor`, it **MUST** fall back to scanning from index 0. It **MUST NOT**
+   treat a bad hint as evidence that no status exists.
+
+Cost is one bundle fetch per 256 leaves scanned.
+
+### 12.3 Verdicts — normative
+
+A verifier reports one of `VERIFIED`, `WITHDRAWN`, `INDETERMINATE`.
+
+- A verifier **MUST** perform status resolution before reporting `VERIFIED`.
+- If no `StatusAnchor` exists anywhere in the log, no status has been published and
+  `VERIFIED` is permitted.
+- If an anchor exists but its artifact cannot be fetched, cannot be parsed, or its
+  BLAKE3 hash does not equal the anchor's `ArtifactHash`, the verifier **MUST**
+  report `INDETERMINATE` and **MUST NOT** report `VERIFIED`.
+- If an anchor exists but none verifies against a pinned identity root, the verifier
+  **MUST** report `INDETERMINATE`. "Cannot check" is not "nothing to check".
+- If the leaf appears in the withdrawn set, the verifier **MUST** report `WITHDRAWN`.
+
+Structural findings — signature validity and proven inclusion — remain true and
+**SHOULD** still be reported for a withdrawn entry. They are facts about what was
+logged; only the verdict speaks to whether HII still stands behind it.
+
+Failing closed here is deliberate. A verifier that downgraded an unreachable
+artifact to `VERIFIED` would let anyone who can block one request suppress every
+revocation, which is the failure mode that made OCSP soft-fail ineffective.
+
+### 12.4 What this does and does not guarantee
+
+Publishing revocation **in the log** means a withdrawal is as tamper-evident as the
+entries it qualifies: HII cannot retract or backdate one without equivocating about
+something the log commits to. Consequently a third party can **disprove** a false
+`VERIFIED` claim by exhibiting the anchor and artifact.
+
+It does **not** compel anyone. No protocol can force a verifier to perform a check,
+and an implementation that skips §12.2 is indistinguishable from one that ran it and
+found nothing. This specification therefore reserves the term: an implementation that
+does not perform status resolution is **not a conforming verifier** and its output
+must not be described as verification under this spec. The §7 revocation vector makes
+that testable.
+
+Readers should also note that the most likely route to a stale claim in practice is
+not a non-conforming verifier at all, but a **frozen artefact** — a screenshot, badge
+image, or PDF asserting a past verification to someone who never runs a verifier.
+Nothing in this specification addresses that; it is a property of how a result is
+presented, not of how it is computed.
+
 ## Appendix A. Implementation index (internal)
 
 The sections above deliberately contain no source-tree paths: this document is published
@@ -483,9 +647,10 @@ HII engineers.
 | §6.1 `simhash-text-v1` | `internal/fuzzy/simhash.go` |
 | §6.2 `phash-dct-64` | `internal/fuzzy/phash.go` |
 | §6.3 `simhash64-v1` | `internal/fuzzy/simhash64.go` |
-| §7 Golden vectors | `spec/simhash64-vectors.json`, `internal/fuzzy/golden_test.go`, `internal/fuzzy/testdata/` |
+| §7 Golden vectors | `spec/simhash64-vectors.json`, `internal/fuzzy/golden_test.go`, `internal/fuzzy/testdata/`, `internal/status/golden_test.go` |
 | §8 Log inclusion | `pkg/cocverify/inclusion.go` |
 | §9 Identity resolution | `pkg/cocverify/identity.go` |
+| §12 Revocation and status | `internal/leaf/status.go`, `internal/status/`, `pkg/cocverify/status.go` |
 | §11 Trust anchors | `cmd/hiipub` derives them; served as `config.json` |
 
 **When editing this document, keep it publication-ready:** put source paths here, not in

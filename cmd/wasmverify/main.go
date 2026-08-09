@@ -1,7 +1,7 @@
 //go:build js && wasm
 
 // Command wasmverify exposes chain-of-creation verification to the browser. Built
-// with GOOS=js GOARCH=wasm, it registers two globals:
+// with GOOS=js GOARCH=wasm, it registers four globals:
 //
 //   - cocVerifyLeaf(leafB64, rawBytesB64?, textB64?) string
 //     Offline: signature + content match. Synchronous (no network). rawBytesB64
@@ -15,6 +15,16 @@
 //     returns a Promise because it does network I/O (browser fetch, via Go's
 //     net/http js transport). The checkpoint is verified against the caller-pinned
 //     (origin, vkey) — never the key the server presents.
+//
+//   - cocVerifyIdentity(leafB64, bindingIndex, readBaseURL, origin, checkpointVkey, identityRootsHex) Promise<string>
+//     Resolves the signer to a creator via a proven IdentityBinding, effective at
+//     the attestation's SubmittedAt.
+//
+//   - cocResolveStatus(leafB64, readBaseURL, origin, checkpointVkey, identityRootsHex) Promise<string>
+//     Reports VERIFIED / WITHDRAWN / INDETERMINATE for the leaf. Fails closed:
+//     a published status artifact that cannot be fetched or hash-matched yields
+//     INDETERMINATE, never VERIFIED. Spec §12 requires a verifier to run this
+//     before presenting a record as verified.
 package main
 
 import (
@@ -22,6 +32,8 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -36,6 +48,7 @@ func main() {
 	js.Global().Set("cocVerifyLeaf", js.FuncOf(verifyLeaf))
 	js.Global().Set("cocVerifyInclusion", js.FuncOf(verifyInclusion))
 	js.Global().Set("cocVerifyIdentity", js.FuncOf(verifyIdentity))
+	js.Global().Set("cocResolveStatus", js.FuncOf(resolveStatus))
 	select {} // keep the Go runtime alive for callbacks
 }
 
@@ -139,6 +152,48 @@ func verifyIdentity(_ js.Value, args []js.Value) any {
 	})
 }
 
+// resolveStatus(leafB64, readBaseURL, origin, checkpointVkey, identityRootsHex)
+// -> Promise<JSON string>. Reports whether HII has withdrawn this leaf.
+//
+// The verdict is VERIFIED, WITHDRAWN, or INDETERMINATE. It fails closed: a
+// published status artifact that cannot be fetched or hash-matched yields
+// INDETERMINATE, never VERIFIED. Per spec §12, a caller MUST run this before
+// presenting a record as verified.
+func resolveStatus(_ js.Value, args []js.Value) any {
+	return newPromise(func() (string, error) {
+		if len(args) < 5 {
+			return "", errArg("cocResolveStatus(leafB64, readBaseURL, origin, checkpointVkey, identityRootsHex)")
+		}
+		rawLeaf, err := base64.StdEncoding.DecodeString(args[0].String())
+		if err != nil {
+			return "", errArg("leaf is not valid base64")
+		}
+		baseURL := strings.TrimSpace(args[1].String())
+		origin := args[2].String()
+		vkey := strings.TrimSpace(args[3].String())
+		roots, err := parseRoots(args[4].String())
+		if err != nil {
+			return "", err
+		}
+		if baseURL == "" || origin == "" || vkey == "" {
+			return "", errArg("readBaseURL, origin, and checkpointVkey are required")
+		}
+		fetcher, err := buildFetcher(baseURL)
+		if err != nil {
+			return "", err
+		}
+		res, err := cocverify.ResolveStatus(context.Background(), fetcher, rawLeaf, origin, vkey, roots)
+		if err != nil {
+			return "", err
+		}
+		b, err := json.Marshal(res)
+		if err != nil {
+			return "", err
+		}
+		return string(b), nil
+	})
+}
+
 // buildFetcher wires a cocverify.Fetcher over Go's net/http (the browser Fetch API
 // under js/wasm) using the Tessera HTTPFetcher, including the entry-bundle fetcher
 // needed for identity resolution.
@@ -151,7 +206,34 @@ func buildFetcher(baseURL string) (cocverify.Fetcher, error) {
 	if err != nil {
 		return cocverify.Fetcher{}, err
 	}
-	return cocverify.Fetcher{Checkpoint: f.ReadCheckpoint, Tile: f.ReadTile, Entries: f.ReadEntryBundle}, nil
+	base := ensureTrailingSlash(baseURL)
+	return cocverify.Fetcher{
+		Checkpoint: f.ReadCheckpoint,
+		Tile:       f.ReadTile,
+		Entries:    f.ReadEntryBundle,
+		Blob:       blobFetcher(base),
+	}, nil
+}
+
+// blobFetcher reads a path relative to the log's read base URL. Used for the
+// revocation status artifact and its discovery hint, which are published next to
+// the tiles rather than inside them.
+func blobFetcher(base string) func(context.Context, string) ([]byte, error) {
+	return func(ctx context.Context, path string) ([]byte, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+path, nil)
+		if err != nil {
+			return nil, err
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("fetch %s: %s", path, resp.Status)
+		}
+		return io.ReadAll(resp.Body)
+	}
 }
 
 func parseIndex(v js.Value) (uint64, error) {

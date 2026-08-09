@@ -26,9 +26,14 @@ import (
 type Fetcher struct {
 	Checkpoint client.CheckpointFetcherFunc
 	Tile       client.TileFetcherFunc
-	// Entries fetches entry bundles. Only identity resolution needs it (to read a
-	// binding leaf by index); inclusion verification leaves it nil.
+	// Entries fetches entry bundles. Identity resolution needs it (to read a
+	// binding leaf by index) and so does status resolution (to scan for status
+	// anchors); inclusion verification leaves it nil.
 	Entries client.EntryBundleFetcherFunc
+	// Blob fetches an arbitrary path relative to the log's read base URL. Only
+	// status resolution needs it, for the revocation artifact and its discovery
+	// hint, which are published alongside the tiles rather than in them.
+	Blob func(ctx context.Context, path string) ([]byte, error)
 }
 
 // InclusionResult reports whether a leaf is committed in the log and the

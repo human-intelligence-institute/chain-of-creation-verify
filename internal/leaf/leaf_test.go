@@ -224,3 +224,102 @@ func TestLeafHashChangesWithContent(t *testing.T) {
 		t.Fatal("LeafHash not stable")
 	}
 }
+
+func sampleStatusAnchor() *StatusAnchor {
+	return &StatusAnchor{
+		SchemaVersion:   1,
+		ArtifactVersion: 3,
+		ArtifactHash:    Hash{0x11, 0x22, 0x33},
+		IssuedAt:        1786000000000,
+	}
+}
+
+func TestStatusAnchorRoundTrip(t *testing.T) {
+	_, priv := mustKey(t)
+	a := sampleStatusAnchor()
+	a.Sign(priv)
+	if !a.Verify() {
+		t.Fatal("Verify() = false on freshly signed anchor")
+	}
+	got, err := UnmarshalStatusAnchor(a.Marshal())
+	if err != nil {
+		t.Fatalf("UnmarshalStatusAnchor: %v", err)
+	}
+	if got.ArtifactVersion != a.ArtifactVersion || got.IssuedAt != a.IssuedAt {
+		t.Fatalf("round-trip mismatch: got %+v want %+v", got, a)
+	}
+	if !bytes.Equal(got.ArtifactHash[:], a.ArtifactHash[:]) {
+		t.Fatal("ArtifactHash did not round-trip")
+	}
+	if !got.Verify() {
+		t.Fatal("decoded anchor failed Verify()")
+	}
+}
+
+func TestStatusAnchorTamperBreaksVerification(t *testing.T) {
+	_, priv := mustKey(t)
+	a := sampleStatusAnchor()
+	a.Sign(priv)
+	a.ArtifactHash[0] ^= 0xff
+	if a.Verify() {
+		t.Fatal("Verify() = true after tampering with ArtifactHash")
+	}
+}
+
+func TestStatusAnchorVersionIsSigned(t *testing.T) {
+	_, priv := mustKey(t)
+	a := sampleStatusAnchor()
+	a.Sign(priv)
+	a.ArtifactVersion = 99
+	if a.Verify() {
+		t.Fatal("Verify() = true after tampering with ArtifactVersion — rollback would be undetectable")
+	}
+}
+
+func TestStatusAnchorRejectsWrongKind(t *testing.T) {
+	_, priv := mustKey(t)
+	b := sampleAttestation()
+	b.Sign(priv)
+	if _, err := UnmarshalStatusAnchor(b.Marshal()); err == nil {
+		t.Fatal("UnmarshalStatusAnchor accepted an Attestation")
+	}
+}
+
+func TestStatusAnchorRejectsTrailingBytes(t *testing.T) {
+	_, priv := mustKey(t)
+	a := sampleStatusAnchor()
+	a.Sign(priv)
+	if _, err := UnmarshalStatusAnchor(append(a.Marshal(), 0x00)); err == nil {
+		t.Fatal("UnmarshalStatusAnchor accepted trailing bytes")
+	}
+}
+
+// TestStatusAnchorSigningPayloadCommitsToDomain asserts the domain tag is
+// actually inside the signed bytes.
+//
+// Comparing a StatusAnchor signature against an IdentityBinding is NOT a valid
+// test of this: their field layouts differ, so verification fails for that
+// reason alone and the assertion passes even with domain separation deleted
+// (verified by mutation). Only inspecting the payload catches its removal.
+func TestStatusAnchorSigningPayloadCommitsToDomain(t *testing.T) {
+	p := sampleStatusAnchor().signingPayload()
+	if !bytes.Contains(p, []byte(domainStatusAnchor)) {
+		t.Fatalf("signing payload does not commit to %q — signatures are replayable across message types", domainStatusAnchor)
+	}
+	if bytes.Contains(p, []byte(domainIdentityBinding)) {
+		t.Fatal("status payload carries the identity-binding domain")
+	}
+}
+
+func TestPeekKindStatusAnchor(t *testing.T) {
+	_, priv := mustKey(t)
+	a := sampleStatusAnchor()
+	a.Sign(priv)
+	k, err := PeekKind(a.Marshal())
+	if err != nil {
+		t.Fatalf("PeekKind: %v", err)
+	}
+	if k != KindStatusAnchor {
+		t.Fatalf("PeekKind = %d, want %d", k, KindStatusAnchor)
+	}
+}
