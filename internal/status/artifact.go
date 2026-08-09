@@ -7,6 +7,7 @@
 package status
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -63,4 +64,20 @@ func (a *Artifact) Find(leafHash [32]byte) (*Entry, bool) {
 		}
 	}
 	return nil, false
+}
+
+// marshalCanonical encodes the artifact deterministically.
+//
+// encoding/json escapes <, > and & by default, which would make the bytes depend
+// on content and diverge from the producer's expectation. Encoder also appends a
+// newline, which must be trimmed — the hash is over the document, not the
+// document plus a separator.
+func marshalCanonical(a Artifact) ([]byte, error) {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(a); err != nil {
+		return nil, err
+	}
+	return bytes.TrimRight(buf.Bytes(), "\n"), nil
 }

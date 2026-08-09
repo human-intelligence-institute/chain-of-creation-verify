@@ -31,6 +31,14 @@ func (i *Issuer) RootPublicKey() [32]byte {
 // Issue creates and signs a binding from a signing key to a creator. Use
 // leaf.KeyHIICustodial when HII holds the signing key, or leaf.KeySelfManaged
 // when the creator controls it.
+// SignerKey returns the identity-root private key.
+//
+// Exposed so the status publisher can sign a StatusAnchor with the same root
+// that signs IdentityBindings — a StatusAnchor is an HII statement about the
+// log, not a per-creator attestation, so it belongs to this key rather than a
+// fourth pinned anchor verifiers would have to obtain and rotate.
+func (i *Issuer) SignerKey() ed25519.PrivateKey { return i.root }
+
 func (i *Issuer) Issue(creatorID string, authorizedKey [32]byte, kt leaf.KeyType, validFrom time.Time) *leaf.IdentityBinding {
 	b := &leaf.IdentityBinding{
 		CreatorID:     creatorID,
