@@ -161,6 +161,10 @@
     .tag.g{color:var(--green)} .tag.a{color:var(--amber)} .tag.r{color:var(--red)}
     .hint{font-size:12.5px;color:var(--slate);line-height:1.5;margin-top:8px}
     .hint em{color:var(--ink);font-style:italic}
+    /* Hover/focus explainer for a measure whose units are not self-evident.
+       focusable so the explanation is reachable without a pointer. */
+    .explain{border-bottom:1px dotted var(--slate);cursor:help}
+    .explain:focus{outline:2px solid var(--slate);outline-offset:2px}
 
     .err-box{border:1px solid var(--red-line);background:var(--red-bg);border-radius:12px;
       padding:16px 18px;margin-top:24px;color:var(--ink)}
@@ -518,8 +522,19 @@
           state = within ? (identical ? "g" : "a") : "r";
           fileKind = within ? (identical ? "fuzzy0" : "fuzzy") : "fuzzyno";
           const sim = (typeof c.fuzzy_distance === "number") ? (1 - c.fuzzy_distance) : null;
+          // "distance" is a normalised fraction of the 64-bit fingerprint, NOT a raw
+          // count of differing bits, and the match threshold differs by media type
+          // (0.15 text, 0.1875 image). Both are easy to misread, so the figure carries
+          // its own explanation.
+          const distanceHelp =
+            "Distance — how far this file's content fingerprint sits from the certified one, " +
+            "as a fraction of the 64-bit fingerprint. 0.0000 means the normalised content is " +
+            "identical; smaller is more similar. It counts as a match at or below the threshold " +
+            "shown alongside it (0.15 for text, 0.1875 for images). Similarity is advisory, not proof.";
+          const distanceText =
+            `<span class="explain" tabindex="0" title="${distanceHelp}">distance ${c.fuzzy_distance.toFixed(4)} / ${c.fuzzy_threshold.toFixed(4)}</span>`;
           html += krow("Similarity",
-            `${sim !== null ? (sim * 100).toFixed(1) + "% · " : ""}${within ? "within" : "above"} threshold (distance ${c.fuzzy_distance.toFixed(4)} / ${c.fuzzy_threshold.toFixed(4)})`,
+            `${sim !== null ? (sim * 100).toFixed(1) + "% · " : ""}${within ? "within" : "above"} threshold (${distanceText})`,
             within ? (identical ? "tag g" : "tag a") : "tag r");
           html += `<div class="hint">${identical
             ? "Identical content to the certified work — the extracted text matches exactly. A different file format or minor formatting can still change the raw bytes, so this is a content match rather than byte-for-byte."
