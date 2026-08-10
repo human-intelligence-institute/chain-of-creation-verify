@@ -610,6 +610,51 @@
     }
 
     // Similarity-check explainer, shown as an (i) after the "consistent copy" verdict.
+    // Revocation status (verification spec §12).
+    //
+    // A log entry means "HII attested this work at time T", not "HII currently
+    // stands behind it". A certification can be withdrawn afterwards, and the
+    // entry stays in the log because the log is append-only. Resolving status is
+    // therefore mandatory before this page may call anything verified — the spec
+    // is explicit that a verifier which cannot resolve status MUST report
+    // INDETERMINATE rather than a clean pass.
+    function statusCard(st, attempted) {
+      let html = `<div class="cardtitle">Withdrawal status</div>`;
+      if (!attempted) {
+        return { state: "n", html: html +
+          `<div class="hint"><b>Not checked.</b> Provide the log configuration under Advanced
+            to check whether HII has withdrawn this certification. Until it is checked, this
+            record cannot be reported as verified.</div>` };
+      }
+      if (!st || st.error) {
+        return { state: "a", html: html +
+          `<div class="hint"><b>Could not be checked:</b> ${st && st.error ? st.error : "no result"}.
+            A record whose status cannot be resolved is not reported as verified.</div>` };
+      }
+      if (st.verdict === "WITHDRAWN") {
+        const w = st.withdrawn || {};
+        const when = w.at
+          ? new Date(Number(w.at)).toISOString().replace("T", " ").slice(0, 19) + " UTC"
+          : "an unrecorded time";
+        return { state: "r", html: html +
+          krow("Status", "✗ withdrawn by HII", "tag r") +
+          krow("Withdrawn", when, "plain") +
+          `<div class="hint">HII has withdrawn this certification${w.reason ? ` (${w.reason})` : ""}.
+            The log entry itself is untouched and still validly signed — it records that HII
+            attested the work at the time. This says HII no longer stands behind it.</div>` };
+      }
+      if (st.verdict === "VERIFIED") {
+        return { state: "g", html: html +
+          krow("Status", "✓ not withdrawn", "tag g") +
+          `<div class="hint">Checked against the signed status artifact that the log itself
+            commits to. HII has not withdrawn this certification.</div>` };
+      }
+      return { state: "a", html: html +
+        `<div class="hint"><b>Could not be determined.</b> A status artifact is published, but it
+          could not be fetched or did not match the commitment in the log. Failing closed: this
+          record is not reported as verified.</div>` };
+    }
+
     const SIMILARITY_INFO = '<span class="info" tabindex="0" role="button" aria-label="What the similarity check means">i<span class="tip">The similarity check looks to see if the uploaded file is sufficiently similar to the certified file that they can reasonably be considered the same. This accounts for minor formatting differences or differing file types. For example: a doc and a pdf of the same content.</span></span>';
 
     // Aggregate the per-check states into one honest verdict.
@@ -617,7 +662,7 @@
       const by = {}; checks.forEach(c => { by[c.key] = c.state; });
       const fileCheck = checks.find(c => c.key === "file");
       const fileKind = fileCheck ? fileCheck.fileKind : null;
-      const sig = by.signature, incl = by.published, idn = by.identity;
+      const sig = by.signature, incl = by.published, idn = by.identity, wdn = by.status;
 
       // Hard, definitive failures -> red.
       if (sig === "r") return { s:"r", g:"✕", title:"Could not verify",
@@ -626,11 +671,17 @@
         body:"This record is not committed in the public transparency log — treat it as unproven." };
       if (idn === "r") return { s:"r", g:"✕", title:"Identity not resolved",
         body:"The record is not tied to a creator identity at the binding you provided." };
+      // Withdrawn is deliberately NOT "could not verify" — the structural checks
+      // above passed and stay true. What changed is HII's own position.
+      if (wdn === "r") return { s:"r", g:"⊘", title:"Withdrawn by HII",
+        body:"This record is validly signed and published in the log, but HII has since withdrawn the certification. The log entry stands as a record of what was attested at the time; it is not a current endorsement." };
 
       const inclProven = incl === "g";
       const idProven = (result.kind !== "attestation") || idn === "g";
-      const inconclusive = incl === "a" || idn === "a";
-      const recordProven = inclProven && idProven && !inconclusive;
+      // Spec §12: status resolution is a precondition for reporting VERIFIED.
+      const notWithdrawn = wdn === "g";
+      const inconclusive = incl === "a" || idn === "a" || wdn === "a";
+      const recordProven = inclProven && idProven && notWithdrawn && !inconclusive;
 
       if (recordProven) {
         const consistentBody = "This record is signed, published in the public log, and tied to a real creator. Your file is a consistent copy of the certified work, not the exact certified bytes. " + SIMILARITY_INFO;
@@ -649,6 +700,7 @@
       const missing = [];
       if (!inclProven) missing.push("log inclusion");
       if (result.kind === "attestation" && !idProven) missing.push("creator identity");
+      if (!notWithdrawn) missing.push("withdrawal status");
       const because = inconclusive ? " (the log could not be reached — this is inconclusive, not a failure)" : "";
       return { s:"a", g:"◈", title:"Signature valid — not fully verified",
         body:`The record’s signature checks out, but ${missing.join(" and ")} ${missing.length>1?"were":"was"} not confirmed${because}. Provide the log configuration under Advanced to complete the check.` };
@@ -743,6 +795,19 @@
           }
         }
 
+        // Revocation status (spec §12) — mandatory before this page may report
+        // anything as verified. Needs the same pinned anchors as identity.
+        let st = null;
+        const wantStatus = Boolean(origin && vkey && idRoot);
+        if (wantStatus) {
+          output.innerHTML = `<p class="status" style="margin-top:24px">Checking whether HII has withdrawn this record…</p>`;
+          try {
+            st = JSON.parse(await cocResolveStatus(leaf, baseUrl, origin, vkey, idRoot));
+          } catch (e) {
+            st = { error: String(e) };
+          }
+        }
+
         // Build the ordered custody chain.
         const checks = [{ key: "signature", state: result.signature_valid ? "g" : "r", html: signatureCard(result) }];
         if (result.kind === "attestation") {
@@ -751,12 +816,14 @@
         }
         const ic = inclusionCard(inc, wantInclusion);
         checks.push({ key: "published", state: ic.state, html: ic.html });
+        const sc = statusCard(st, wantStatus);
+        checks.push({ key: "status", state: sc.state, html: sc.html });
         if (result.kind === "attestation") {
           const idc = identityCard(id, wantIdentity);
           checks.push({ key: "identity", state: idc.state, html: idc.html });
         }
 
-        raw.textContent = JSON.stringify({ leaf: result, inclusion: inc, identity: id }, null, 2);
+        raw.textContent = JSON.stringify({ leaf: result, inclusion: inc, identity: id, status: st }, null, 2);
         output.innerHTML = renderResults(result, checks);
       } catch (e) {
         output.innerHTML = `<div class="err-box"><b>Error:</b> ${e}</div>`;
