@@ -238,9 +238,9 @@
   <label class="drop" id="drop" for="media">
     <div class="ic">⬆</div>
     <div class="big" id="drop-title">Drop the file you want to check</div>
-    <div class="sub" id="drop-sub">or choose a file · .docx, .pdf, .txt · stays in your browser</div>
+    <div class="sub" id="drop-sub">or choose a file · .docx, .pdf, .epub, .txt · stays in your browser</div>
     <input type="file" id="media"
-      accept=".txt,.docx,.pdf,text/plain,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+      accept=".txt,.docx,.pdf,.epub,text/plain,application/pdf,application/epub+zip,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
       style="display:none" />
   </label>
 
@@ -365,7 +365,7 @@
       } else {
         dropEl.classList.remove("has-file");
         title.textContent = "Drop the file you want to check";
-        sub.textContent = "or choose a file · .docx, .pdf, .txt · stays in your browser";
+        sub.textContent = "or choose a file · .docx, .pdf, .epub, .txt · stays in your browser";
       }
     }
     mediaEl.addEventListener("change", showChosenFile);
@@ -430,6 +430,7 @@
       if (n.endsWith(".txt") || file.type === "text/plain") return "txt";
       if (n.endsWith(".docx") || file.type === DOCX_MIME) return "docx";
       if (n.endsWith(".pdf") || file.type === "application/pdf") return "pdf";
+      if (n.endsWith(".epub") || file.type === "application/epub+zip") return "epub";
       return null;
     }
     let _mammoth = null, _pdfjs = null;
@@ -449,9 +450,149 @@
       _pdfjs.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.mjs";
       return _pdfjs;
     }
+    // --- .epub ---------------------------------------------------------------
+    // An EPUB (OCF) is a plain ZIP of XHTML, so it needs no vendored reader: the
+    // central directory is walked by hand and entries are inflated with the
+    // platform's own DecompressionStream. That keeps a security-sensitive static
+    // page free of another few hundred KB of unaudited third-party code.
+    //
+    // Only container.xml, the OPF and the spine documents are inflated — images
+    // and fonts are located but never decoded.
+
+    // Read the ZIP central directory and return {name -> entry} without
+    // inflating anything. Entries are inflated on demand by readEntry().
+    function zipIndex(buf) {
+      const dv = new DataView(buf), u8 = new Uint8Array(buf);
+      // The EOCD sits at the tail, after an optional comment of up to 65535
+      // bytes. Scan backwards for its signature rather than assuming it is last.
+      const maxBack = Math.min(u8.length, 65535 + 22);
+      let eocd = -1;
+      for (let i = u8.length - 22; i >= u8.length - maxBack && i >= 0; i--) {
+        if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+      }
+      if (eocd < 0) throw new Error("not a valid .epub (no ZIP end-of-directory record)");
+      const count = dv.getUint16(eocd + 10, true);
+      let p = dv.getUint32(eocd + 16, true); // central directory offset
+      const entries = new Map();
+      for (let i = 0; i < count; i++) {
+        if (dv.getUint32(p, true) !== 0x02014b50) break; // central file header
+        const method = dv.getUint16(p + 10, true);
+        const compSize = dv.getUint32(p + 20, true);
+        const nameLen = dv.getUint16(p + 28, true);
+        const extraLen = dv.getUint16(p + 30, true);
+        const commentLen = dv.getUint16(p + 32, true);
+        const localOff = dv.getUint32(p + 42, true);
+        const name = new TextDecoder("utf-8").decode(u8.subarray(p + 46, p + 46 + nameLen));
+        entries.set(name, { method, compSize, localOff });
+        p += 46 + nameLen + extraLen + commentLen;
+      }
+      return { dv, u8, entries };
+    }
+
+    // Inflate one entry to a string. The local header's name/extra lengths are
+    // authoritative — they can differ from the central directory's, so the data
+    // offset must be computed from the local header, not assumed.
+    async function readEntry(zip, name) {
+      const e = zip.entries.get(name);
+      if (!e) return null;
+      const { dv, u8 } = zip;
+      if (dv.getUint32(e.localOff, true) !== 0x04034b50) return null;
+      const nameLen = dv.getUint16(e.localOff + 26, true);
+      const extraLen = dv.getUint16(e.localOff + 28, true);
+      const start = e.localOff + 30 + nameLen + extraLen;
+      const raw = u8.subarray(start, start + e.compSize);
+      // method 0 is STORED — the OCF spec requires it for the `mimetype` entry.
+      if (e.method === 0) return new TextDecoder("utf-8").decode(raw);
+      if (e.method !== 8) throw new Error(`unsupported .epub compression (method ${e.method})`);
+      const ds = new DecompressionStream("deflate-raw");
+      const out = new Response(raw).body.pipeThrough(ds);
+      return new TextDecoder("utf-8").decode(await new Response(out).arrayBuffer());
+    }
+
+    // Resolve an href against the directory of the file that referenced it —
+    // OPF hrefs are relative to the OPF, which usually lives in OEBPS/, not at
+    // the archive root.
+    function zipResolve(base, href) {
+      const path = href.split("#")[0];
+      if (!path) return null;
+      const dir = base.includes("/") ? base.slice(0, base.lastIndexOf("/") + 1) : "";
+      const segs = [];
+      for (const s of (dir + path).split("/")) {
+        if (s === "" || s === ".") continue;
+        if (s === "..") segs.pop(); else segs.push(s);
+      }
+      return segs.join("/");
+    }
+
+    // Parse XML/XHTML, falling back to the lenient HTML parser. Plenty of real
+    // EPUBs are not well-formed XML; without the fallback those extract as empty
+    // text, which would look like a legitimate "no match" rather than a failure.
+    function parseDoc(text) {
+      const xml = new DOMParser().parseFromString(text, "application/xhtml+xml");
+      if (!xml.querySelector("parsererror")) return xml;
+      return new DOMParser().parseFromString(text, "text/html");
+    }
+
+    // textContent runs adjacent block elements together — `<h1>Hours</h1><p>Marguerite`
+    // yields "HoursMarguerite", one bogus token where the certifier's text had two.
+    // §6.3 normalization collapses any run of non-alphanumerics to one space, so
+    // separating the blocks with a newline is enough to make the token streams agree.
+    const BLOCK_SEL = "address,article,aside,blockquote,br,dd,div,dl,dt,figcaption," +
+      "figure,footer,h1,h2,h3,h4,h5,h6,header,hr,li,main,nav,ol,p,pre,section," +
+      "table,tbody,td,th,thead,tr,ul";
+    function blockText(doc) {
+      const body = doc.body;
+      if (!body) return "";
+      for (const el of body.querySelectorAll(BLOCK_SEL)) {
+        el.parentNode.insertBefore(doc.createTextNode("\n"), el);
+      }
+      return body.textContent;
+    }
+
+    const XHTML_TYPES = ["application/xhtml+xml", "text/html"];
+    async function extractEpub(file) {
+      const zip = zipIndex(await file.arrayBuffer());
+      if (zip.entries.has("META-INF/encryption.xml")) {
+        throw new Error("this .epub is encrypted (DRM), so its text cannot be read");
+      }
+      const containerXml = await readEntry(zip, "META-INF/container.xml");
+      if (!containerXml) throw new Error("not a valid .epub (missing META-INF/container.xml)");
+      const rootfile = parseDoc(containerXml).querySelector("rootfile");
+      const opfPath = rootfile && rootfile.getAttribute("full-path");
+      if (!opfPath) throw new Error("not a valid .epub (no rootfile in container.xml)");
+      const opfXml = await readEntry(zip, opfPath);
+      if (!opfXml) throw new Error(`not a valid .epub (missing ${opfPath})`);
+      const opf = parseDoc(opfXml);
+
+      // id -> href for the XHTML documents only; images and fonts are skipped
+      // here so they are never inflated.
+      const hrefById = new Map();
+      for (const item of opf.querySelectorAll("manifest > item")) {
+        const type = (item.getAttribute("media-type") || "").toLowerCase();
+        if (!XHTML_TYPES.includes(type)) continue;
+        const id = item.getAttribute("id"), href = item.getAttribute("href");
+        if (id && href) hrefById.set(id, href);
+      }
+
+      // Reading order comes from the spine, not the archive order. linear="no"
+      // marks auxiliary matter (nav, colophon) that is not part of the text.
+      const parts = [];
+      for (const ref of opf.querySelectorAll("spine > itemref")) {
+        if (ref.getAttribute("linear") === "no") continue;
+        const href = hrefById.get(ref.getAttribute("idref"));
+        if (!href) continue;
+        const text = await readEntry(zip, zipResolve(opfPath, href));
+        if (text === null) continue;
+        const body = blockText(parseDoc(text));
+        if (body) parts.push(body);
+      }
+      if (!parts.length) throw new Error("no readable text found in this .epub");
+      return parts.join("\n");
+    }
+
     async function extractText(file) {
       const kind = detectKind(file);
-      if (!kind) throw new Error("unsupported file type — upload a .docx, .pdf, or .txt");
+      if (!kind) throw new Error("unsupported file type — upload a .docx, .pdf, .epub, or .txt");
       if (kind === "txt") return await file.text();
       if (kind === "docx") {
         const m = await loadMammoth();
@@ -459,6 +600,7 @@
         const { value } = await m.extractRawText({ arrayBuffer });
         return value || "";
       }
+      if (kind === "epub") return await extractEpub(file);
       const pdfjs = await loadPdfjs();
       const data = await file.arrayBuffer();
       const doc = await pdfjs.getDocument({ data }).promise;
@@ -499,7 +641,7 @@
         return { state: "n", html:
           `<div class="cardtitle">Your file</div>` +
           `<div class="hint">No file provided — content was not checked. Add the work file
-            (.docx / .pdf / .txt) above to test exact and fuzzy matches.</div>` };
+            (.docx / .pdf / .epub / .txt) above to test exact and fuzzy matches.</div>` };
       }
       let html = `<div class="cardtitle">Your file</div>`;
       html += krow("Algorithm", c.algorithm_id || "—", "");

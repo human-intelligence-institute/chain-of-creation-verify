@@ -263,11 +263,23 @@ only their standard library — no HII code, no variant ambiguity.
 **Threshold:** `0.15` (≤ 9 differing bits). Golden vectors: §7.
 
 > **Extraction note (re-implementers).** The fingerprint is defined over **text**. When
-> the certified work is a binary document (`.docx`, `.pdf`), the ledger digest was computed
-> over text the certifier extracted client-side; an independent verifier must extract text
-> and can differ slightly (tables, footnotes, word boundaries), shifting a few bits. The
-> hosted verifier reuses the same extraction libraries to minimize this. Treat a fuzzy
-> result as advisory (§1), never as proof.
+> the certified work is a binary document (`.docx`, `.pdf`, `.epub`), the ledger digest was
+> computed over text the certifier extracted client-side; an independent verifier must
+> extract text and can differ slightly (tables, footnotes, word boundaries), shifting a few
+> bits. Where a certifier exists for the format, the hosted verifier reuses the same
+> extraction libraries to minimize this; for a format no certifier emits — `.epub` today —
+> the candidate is being compared against a leaf certified from some other format, so
+> extraction drift is unavoidable and only the fuzzy result is meaningful (the exact hash
+> commits to bytes that an `.epub` will never reproduce). Treat a fuzzy result as advisory
+> (§1), never as proof.
+>
+> **Word boundaries are the trap.** Step 2.4 collapses every non-alphanumeric run to a
+> single space, so *any* separator between two words is equivalent — but *no* separator is
+> not. Extractors that concatenate block elements without one (a DOM `textContent` over
+> `<h1>Hours</h1><p>Marguerite…`, joining PDF text spans) fuse two words into a single
+> token, and each fused token corrupts three shingles. Measured on a two-paragraph EPUB:
+> **5 of 64 bits** — over half the 0.15 budget, still "within threshold", and it compounds
+> with every block junction. Emit a separator at every block boundary.
 
 ## 7. Golden vectors
 
