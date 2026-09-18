@@ -657,6 +657,29 @@ does not perform status resolution is **not a conforming verifier** and its outp
 must not be described as verification under this spec. The §7 revocation vector makes
 that testable.
 
+**Withdrawal is not instantaneous.** The status artifact is republished by a periodic
+reconciliation of HII's records, not as an immediate side effect of a withdrawal, so a
+newly withdrawn entry becomes visible only at the next publication. HII currently
+reconciles every **minute**, so a withdrawal may lag by up to that interval. A
+verifier that resolves status inside that window will report `VERIFIED` for an entry
+that has already been withdrawn — correctly, on the evidence then published, and this
+specification does not treat it as a conformance failure.
+
+Two consequences for implementers:
+
+- A verifier **MUST NOT** treat an artifact as describing the instant it was fetched.
+  `issued_at` and `log_size_at_issue` (§12.1) state when it was produced and against
+  what tree size; a verifier that needs to bound its own staleness should read them
+  rather than assume freshness.
+- The **bytes** of `v<N>.json` are immutable and may be cached indefinitely (§12.1),
+  but the conclusion that *`N` is the newest version* is not. A verifier **MUST** redo
+  discovery (§12.2) on each verification rather than reusing a previous answer; a cached
+  notion of "latest" is exactly how a withdrawal gets missed indefinitely.
+
+The interval is an operational parameter and may change; it is not a protocol constant.
+What this specification fixes is the shape — publication is asynchronous and bounded,
+and the artifact carries the timestamps needed to reason about it.
+
 Readers should also note that the most likely route to a stale claim in practice is
 not a non-conforming verifier at all, but a **frozen artefact** — a screenshot, badge
 image, or PDF asserting a past verification to someone who never runs a verifier.
