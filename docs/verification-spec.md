@@ -255,6 +255,23 @@ The content fingerprint HII certifiers compute client-side and record on the led
 7. Fingerprint bit `i` = `1` iff `acc[i] > 0`. Serialize the 64-bit fingerprint
    **big-endian** into 8 bytes (equivalently, 16 lowercase hex chars, high 32 bits first).
 
+**Empty / no-shingle input — implementation-defined.** Text that normalizes to no tokens
+yields no shingles, so step 6 leaves every accumulator at `0` and step 7 yields the all-zero
+digest `0000000000000000`. A conforming implementation MAY emit that digest, or MAY omit the
+fingerprint entirely — both are correct. HII's *verifiers* (the Go reference, the Python
+verifier) emit it; HII's *certifiers* (Word add-in, gdoc extension, support-app) omit it, so
+that nothing meaningless is transmitted or stored.
+
+Consequently a verifier:
+
+* MUST treat a **missing** fingerprint as *no claim* — not as a failed match, and not as
+  grounds to reject the certificate; and
+* MUST NOT treat an **all-zero** digest as evidence of a match. Two empty digests sit at
+  Hamming distance 0 while sharing no content, so the comparison is meaningless rather than
+  conclusive. Reject the input instead.
+
+This is the only vector in §7 that implementations are not required to reproduce.
+
 **Why SHA-256 features.** MurmurHash3 (the usual SimHash feature hash) has several
 mutually-incompatible variants (x86_32 vs x64_128, seed/sign handling); SHA-256 has
 exactly one definition in every language, so a third party reproduces this digest with
@@ -288,9 +305,10 @@ suites; the image inputs are fixed files, available on request.
 
 ### `simhash64-v1`
 
-The vectors below are the single source of truth that the coc verifier **and** every HII
-certifier (customer-app, Word add-in, gdoc extension) reproduce byte-for-byte in their own
-test suites. A machine-readable copy is available on request.
+The vectors below are the single source of truth that the coc verifier, infrastructure's
+Python verifier **and** every HII certifier (Word add-in, gdoc extension, support-app)
+reproduce byte-for-byte in their own test suites — with the one specified exception of the
+empty input, below. A machine-readable copy is available on request.
 
 | Input (exact UTF-8) | Digest (hex, big-endian) |
 |---------------------|--------------------------|
@@ -299,7 +317,7 @@ test suites. A machine-readable copy is available on request.
 | `Provenance you can verify.` | `f560282f20b80090` |
 | `café déjà vu 🎨 naïve façade` | `b1ea06b8a80badd3` |
 | `two words` (fewer than 3 tokens ⇒ one shingle) | `a03f1d611645eb53` |
-| `` (empty) | `0000000000000000` |
+| `` (empty) | `0000000000000000`, **or the fingerprint omitted** — implementation-defined, §6.3 |
 
 The first two rows differ only in case, whitespace, and trailing punctuation, yet hash
 identically — that reformatting-invariance is the point of the fuzzy digest.
