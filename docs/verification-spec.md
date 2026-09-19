@@ -308,7 +308,9 @@ suites; the image inputs are fixed files, available on request.
 The vectors below are the single source of truth that the coc verifier, infrastructure's
 Python verifier **and** every HII certifier (Word add-in, gdoc extension, support-app)
 reproduce byte-for-byte in their own test suites — with the one specified exception of the
-empty input, below. A machine-readable copy is available on request.
+empty input, below. A machine-readable copy of exactly these vectors is published at
+**<https://www.humancreator.com/simhash64-vectors.json>** — fetch it rather than
+transcribing the table.
 
 | Input (exact UTF-8) | Digest (hex, big-endian) |
 |---------------------|--------------------------|
