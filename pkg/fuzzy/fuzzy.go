@@ -12,6 +12,7 @@ package fuzzy
 import (
 	"errors"
 	"fmt"
+	"sort"
 
 	"github.com/human-intelligence-institute/chain-of-creation-verify/pkg/leaf"
 )
@@ -73,6 +74,19 @@ func (r *Registry) Register(d Digester, media ...leaf.MediaType) {
 func (r *Registry) Get(id string) (Digester, bool) {
 	d, ok := r.byID[id]
 	return d, ok
+}
+
+// IDs returns every registered algorithm ID, sorted. The frozen leaf corpus
+// uses it to assert that no published algorithm is left without a case: adding
+// an algorithm here without a corpus entry is exactly the drift the corpus
+// exists to prevent.
+func (r *Registry) IDs() []string {
+	ids := make([]string, 0, len(r.byID))
+	for id := range r.byID {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
 }
 
 // Verifier returns the verification-capable implementation for an algorithm ID,

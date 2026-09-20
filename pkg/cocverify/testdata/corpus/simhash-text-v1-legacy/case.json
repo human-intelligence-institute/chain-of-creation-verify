@@ -1,0 +1,21 @@
+{
+  "name": "simhash-text-v1-legacy",
+  "why": "the deprecated text algorithm id must stay resolvable: this is the 2036 promise, and the one case that catches quietly dropping an old format",
+  "leaf": "leaf.bin",
+  "media": "media.txt",
+  "expect": {
+    "kind": "attestation",
+    "signature_valid": true,
+    "leaf_hash": "4deead86c470d5d0785bc2744e2699b5be09685157de496e2305e23e7dc99237",
+    "work_id": "c0120001000000000000000000000000",
+    "event_type": "publish",
+    "content": {
+      "exact_match": true,
+      "algorithm_id": "simhash-text-v1",
+      "fuzzy_checked": true,
+      "fuzzy_match": true,
+      "fuzzy_distance": 0,
+      "fuzzy_threshold": 0.15
+    }
+  }
+}

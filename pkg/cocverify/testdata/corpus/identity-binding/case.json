@@ -1,0 +1,11 @@
+{
+  "name": "identity-binding",
+  "why": "the second leaf kind's encoding and issuer-signature domain separation",
+  "leaf": "leaf.bin",
+  "expect": {
+    "kind": "identity_binding",
+    "signature_valid": true,
+    "leaf_hash": "dafe64994bd183e19fb05a0c56f7b0354d492758e0b8aae675b19344b16ceddb",
+    "creator_id": "creator-corpus-1"
+  }
+}

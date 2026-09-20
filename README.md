@@ -94,6 +94,51 @@ go test ./pkg/fuzzy/... ./pkg/status/... -run Golden -v
 A full test run (`go test ./...`) exercises all eight packages, including the WebAssembly
 build's parity test against the same golden vectors (`wasm_parity_test.go`).
 
+## The frozen leaf corpus
+
+The golden vectors freeze the **digest function**. They do not freeze a **certificate** —
+and a certificate is what somebody is holding in 2036 when they ask whether it still
+verifies.
+
+`pkg/cocverify/testdata/corpus/` holds complete, signed leaves — one directory per case,
+covering every algorithm id this build resolves, both leaf kinds, and the failure paths
+(unrelated content, an unknown algorithm id, a tampered signature). Each `case.json`
+records the **entire expected verification result**, including the leaf hash. Run it with:
+
+```sh
+go test ./pkg/cocverify/ -run Golden -v
+```
+
+These are bytes on disk that no test regenerates, and that distinction is the whole point.
+Every other test here builds its input with the same code it is testing, so a *consistent*
+refactor — reordering two fields in both the encoder and the decoder, say — leaves the
+entire rest of the suite green while invalidating every leaf ever written to a log. We
+checked: that mutation reddens `TestGoldenLeafCorpus` and nothing else, `pkg/leaf`'s own
+round-trip tests included. Quietly loosening a fuzzy-match threshold is likewise caught
+here and nowhere else.
+
+> ⚠️ **A red test here is not a fixture to refresh.** It means a published contract moved,
+> which requires a new algorithm id or schema version — never an in-place edit.
+> `cmd/gencorpus`, which produced these files, refuses to overwrite an existing case for
+> that reason.
+
+### A caveat on `phash-dct-64` and synthetic images
+
+Building this corpus surfaced a real limitation worth stating plainly. pHash thresholds each
+low-frequency DCT coefficient against the block median with a bare `c > median` and no tie
+tolerance. For an image whose low-frequency spectrum is *degenerate* — a flat fill, a linear
+gradient, perfectly repeating bands — almost every coefficient lands on the median at
+numerical zero, and each of those bits is then decided by floating-point rounding. One such
+test image produced `6d696d216d006d6f` natively and `796979097900797b` under js/wasm: 6
+differing bits for the same input.
+
+Photographs never look like this; synthetic graphics can, and `digital-art` is an accepted
+media type. So for such images, "a third party reproduces the digest byte-for-byte" is not
+unconditionally true of `phash-dct-64` the way it is of `simhash64-v1` (pure integer
+arithmetic over SHA-256). The match threshold absorbs the difference in practice — 6 bits is
+well inside it — but an implementer comparing digests exactly should know this exists. It is
+tracked as a spec issue; `docs/verification-spec.md` does not yet say so.
+
 ## Verifying the hosted verifier
 
 The WebAssembly verifier HII serves in the browser is built from this module — there is no
@@ -163,6 +208,8 @@ fixture coverage was follow-up work. That is no longer true — this paragraph r
 
 The fixture is deliberately the material a third party actually has: static log artifacts,
 not a live node. You can run the suite offline and get the same result we do.
+
+Whole-certificate coverage is handled separately by the frozen leaf corpus described above.
 
 What remains genuinely weaker is this: the fixtures exercise the verifier against a
 **recorded** log, so they cannot catch a regression that only appears against a live, growing

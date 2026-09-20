@@ -1,0 +1,22 @@
+{
+  "name": "phash-dct-64-brightened",
+  "why": "a global exposure change must come out at distance EXACTLY 0: the DC term is excluded from the median, so pHash is brightness-invariant by construction, and that invariance is a published property worth freezing",
+  "leaf": "leaf.bin",
+  "media": "media.png",
+  "expect": {
+    "kind": "attestation",
+    "signature_valid": true,
+    "leaf_hash": "c17e05ea65d26642d5ccb0cd91dc44d474e6f9bdd736500ec7548b7791a98938",
+    "work_id": "c0120001000000000000000000000002",
+    "event_seq": 2,
+    "event_type": "publish",
+    "content": {
+      "exact_match": false,
+      "algorithm_id": "phash-dct-64",
+      "fuzzy_checked": true,
+      "fuzzy_match": true,
+      "fuzzy_distance": 0,
+      "fuzzy_threshold": 0.1875
+    }
+  }
+}

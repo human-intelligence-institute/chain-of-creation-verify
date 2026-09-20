@@ -1,0 +1,1 @@
+Tessera stores entry bundles under tile paths, and a checkpoint names the tree size and root hash that the inclusion proof is checked against.

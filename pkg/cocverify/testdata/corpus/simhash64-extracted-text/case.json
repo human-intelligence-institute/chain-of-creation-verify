@@ -1,0 +1,23 @@
+{
+  "name": "simhash64-extracted-text",
+  "why": "a container format: raw bytes are not the digested text, so exact must fail while fuzzy holds at distance 0",
+  "leaf": "leaf.bin",
+  "media": "media.bin",
+  "text": "text.txt",
+  "expect": {
+    "kind": "attestation",
+    "signature_valid": true,
+    "leaf_hash": "cea77a2bd744d700a111921164e99113f071539c181254722fb3ca23abde6eb1",
+    "work_id": "c0120001000000000000000000000001",
+    "event_seq": 1,
+    "event_type": "publish",
+    "content": {
+      "exact_match": false,
+      "algorithm_id": "simhash64-v1",
+      "fuzzy_checked": true,
+      "fuzzy_match": true,
+      "fuzzy_distance": 0,
+      "fuzzy_threshold": 0.15
+    }
+  }
+}

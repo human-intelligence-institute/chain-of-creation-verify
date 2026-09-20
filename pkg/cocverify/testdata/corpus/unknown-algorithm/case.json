@@ -1,0 +1,22 @@
+{
+  "name": "unknown-algorithm",
+  "why": "a leaf naming an algorithm this build does not know must degrade to a note, not a crash or a silent pass",
+  "leaf": "leaf.bin",
+  "media": "media.txt",
+  "expect": {
+    "kind": "attestation",
+    "signature_valid": true,
+    "leaf_hash": "4ac0270b65dd9726dfedc1ea087f5ec9ac9511802d4c7a043cb017b4b7b3c7a3",
+    "work_id": "c0120001000000000000000000000000",
+    "event_type": "publish",
+    "content": {
+      "exact_match": true,
+      "algorithm_id": "simhash64-v99",
+      "fuzzy_checked": false,
+      "fuzzy_match": false,
+      "fuzzy_distance": 0,
+      "fuzzy_threshold": 0,
+      "note": "fuzzy: unknown algorithm: \"simhash64-v99\""
+    }
+  }
+}
