@@ -119,9 +119,27 @@ Three other things will change the bytes, so get them right before concluding an
 - `go get` must name the **package** path (`.../cmd/wasmverify@vX.Y.Z`), not just the module
   path. Fetching the module alone does not record the `go.sum` entries the build needs, and
   the build fails rather than silently differing.
-- Use the tag the host is actually serving, not `@latest`.
+- Use the tag the host is actually serving, not `@latest`. See the warning below — this one
+  is easy to get wrong and looks alarming when you do.
 - Build with the Go toolchain this module's `go.mod` requires. A different Go version
   produces a different binary.
+
+> ⚠️ **The hash is version-specific, not source-specific.** Go records the module version in
+> `debug.BuildInfo`, so **two tags with byte-identical source still produce different
+> binaries**. `v1.0.0` and `v1.0.1` of this module contain no code difference whatsoever —
+> `git diff v1.0.0 v1.0.1 -- pkg internal cmd web spec go.mod go.sum` is empty — and their
+> wasm builds differ regardless.
+>
+> So comparing the **newest** release asset against a host still pinned to an older tag
+> yields a mismatch that means nothing at all. Compare like for like: build the tag the host
+> serves, or download that tag's release asset.
+
+### Which tag is the host serving?
+
+Honest answer: the served bundle does not currently advertise its version, so you cannot read
+it off the wire. Until that changes, either ask HII, or download release assets newest-first
+until one matches — a match identifies the tag. We regard this as a gap in our own
+verifiability story rather than a property we are content with.
 
 Substitute `<verifier-host>` with the host you are checking. HII's verifier is currently
 served from a CloudFront distribution and has no permanent custom domain yet, so rather than
