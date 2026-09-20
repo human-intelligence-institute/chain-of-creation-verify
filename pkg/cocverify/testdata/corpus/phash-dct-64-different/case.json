@@ -1,0 +1,22 @@
+{
+  "name": "phash-dct-64-different",
+  "why": "a structurally different image must exceed the perceptual threshold — the image-side negative",
+  "leaf": "leaf.bin",
+  "media": "media.png",
+  "expect": {
+    "kind": "attestation",
+    "signature_valid": true,
+    "leaf_hash": "d0dfea983b44fe321da687ed216edabea9961c7838c739ee2081d210d83b7cdf",
+    "work_id": "c0120001000000000000000000000003",
+    "event_seq": 3,
+    "event_type": "publish",
+    "content": {
+      "exact_match": false,
+      "algorithm_id": "phash-dct-64",
+      "fuzzy_checked": true,
+      "fuzzy_match": false,
+      "fuzzy_distance": 0.5,
+      "fuzzy_threshold": 0.1875
+    }
+  }
+}

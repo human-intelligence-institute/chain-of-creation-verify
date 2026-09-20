@@ -1,0 +1,22 @@
+{
+  "name": "tampered-attestation",
+  "why": "one flipped byte in the signed region must read as an invalid signature — the negative that gives the positives meaning",
+  "leaf": "leaf.bin",
+  "media": "media.txt",
+  "expect": {
+    "kind": "attestation",
+    "signature_valid": false,
+    "leaf_hash": "f4d8c293a4ed085652e564f366225f6daf33e6f1e62d9fa4be8de55a0ea71614",
+    "work_id": "c0120001000000000000000000000000",
+    "event_seq": 1,
+    "event_type": "publish",
+    "content": {
+      "exact_match": true,
+      "algorithm_id": "simhash64-v1",
+      "fuzzy_checked": true,
+      "fuzzy_match": true,
+      "fuzzy_distance": 0,
+      "fuzzy_threshold": 0.15
+    }
+  }
+}

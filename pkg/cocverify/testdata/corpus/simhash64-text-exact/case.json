@@ -1,0 +1,21 @@
+{
+  "name": "simhash64-text-exact",
+  "why": "the current default text algorithm, exact and fuzzy agreeing on the certified file",
+  "leaf": "leaf.bin",
+  "media": "media.txt",
+  "expect": {
+    "kind": "attestation",
+    "signature_valid": true,
+    "leaf_hash": "75e70aa2b52603c77d5c0abdf5054659a2d95d0ada353501c66dc76575cb1702",
+    "work_id": "c0120001000000000000000000000000",
+    "event_type": "publish",
+    "content": {
+      "exact_match": true,
+      "algorithm_id": "simhash64-v1",
+      "fuzzy_checked": true,
+      "fuzzy_match": true,
+      "fuzzy_distance": 0,
+      "fuzzy_threshold": 0.15
+    }
+  }
+}

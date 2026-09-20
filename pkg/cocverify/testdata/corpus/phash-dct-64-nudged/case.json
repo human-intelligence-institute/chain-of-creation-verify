@@ -1,0 +1,22 @@
+{
+  "name": "phash-dct-64-nudged",
+  "why": "a small compositional edit: a NONZERO distance still under threshold — without it every passing phash case sits at 0 and a distance metric stuck at 0 would satisfy the whole corpus",
+  "leaf": "leaf.bin",
+  "media": "media.png",
+  "expect": {
+    "kind": "attestation",
+    "signature_valid": true,
+    "leaf_hash": "c8cc0815167886206ebc6f68a4fcab325dd5a6a18775c8e40fe9cd643e51e8e7",
+    "work_id": "c0120001000000000000000000000004",
+    "event_seq": 4,
+    "event_type": "publish",
+    "content": {
+      "exact_match": false,
+      "algorithm_id": "phash-dct-64",
+      "fuzzy_checked": true,
+      "fuzzy_match": true,
+      "fuzzy_distance": 0.09375,
+      "fuzzy_threshold": 0.1875
+    }
+  }
+}

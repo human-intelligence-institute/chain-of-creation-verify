@@ -1,0 +1,22 @@
+{
+  "name": "phash-dct-64-reencoded",
+  "why": "a JPEG re-encode: exact fails, perceptual match survives — the property pHash is chosen for",
+  "leaf": "leaf.bin",
+  "media": "media.jpg",
+  "expect": {
+    "kind": "attestation",
+    "signature_valid": true,
+    "leaf_hash": "040e937b1477de83dacd13385958280e81fdd7159922ebc0272058a69d9582b9",
+    "work_id": "c0120001000000000000000000000001",
+    "event_seq": 1,
+    "event_type": "publish",
+    "content": {
+      "exact_match": false,
+      "algorithm_id": "phash-dct-64",
+      "fuzzy_checked": true,
+      "fuzzy_match": true,
+      "fuzzy_distance": 0,
+      "fuzzy_threshold": 0.1875
+    }
+  }
+}

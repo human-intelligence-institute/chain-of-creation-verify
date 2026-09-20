@@ -1,0 +1,21 @@
+{
+  "name": "phash-dct-64-exact",
+  "why": "the image algorithm on the certified file; also pins the floating-point DCT, which could drift between native and wasm",
+  "leaf": "leaf.bin",
+  "media": "media.png",
+  "expect": {
+    "kind": "attestation",
+    "signature_valid": true,
+    "leaf_hash": "1aa050e3c3a0330b64ab44473949503aec6021e85737994f38955adf257c1336",
+    "work_id": "c0120001000000000000000000000000",
+    "event_type": "publish",
+    "content": {
+      "exact_match": true,
+      "algorithm_id": "phash-dct-64",
+      "fuzzy_checked": true,
+      "fuzzy_match": true,
+      "fuzzy_distance": 0,
+      "fuzzy_threshold": 0.1875
+    }
+  }
+}

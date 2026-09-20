@@ -48,6 +48,12 @@ jobs:
     # resolution would surface as a false VERIFIED in the browser while native
     # Go stayed correct.
     #
+    # pkg/cocverify carries the frozen leaf corpus (TestGoldenLeafCorpus). It
+    # earned its place here: an early corpus image whose DCT coefficients all sat
+    # on the median produced a DIFFERENT digest natively and under wasm. The image
+    # was degenerate rather than the verifier broken, but nothing else in CI would
+    # have shown it.
+    #
     # ⚠️ Packages MUST be listed EXPLICITLY — `./...` cannot be used because
     # tessera/storage/posix does not build for js/wasm. A new package with
     # Golden tests is invisible to this job until it is added to the line below.
@@ -59,7 +65,7 @@ jobs:
           go-version-file: go.mod
           cache: true
       - name: Golden vectors under js/wasm
-        run: PATH="$PATH:$(go env GOROOT)/lib/wasm" GOOS=js GOARCH=wasm go test -v ./pkg/fuzzy/ ./pkg/status/ -run Golden
+        run: PATH="$PATH:$(go env GOROOT)/lib/wasm" GOOS=js GOARCH=wasm go test -v ./pkg/fuzzy/ ./pkg/status/ ./pkg/cocverify/ -run Golden
       - name: WASM verifier builds
         run: GOOS=js GOARCH=wasm go build -o /tmp/cocverify.wasm ./cmd/wasmverify
 
