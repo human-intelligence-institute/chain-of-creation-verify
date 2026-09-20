@@ -1,0 +1,77 @@
+# Continuous integration for chain-of-creation-verify, the public reference
+# implementation of the chain-of-creation verification specification.
+#
+# All third-party actions are SHA-pinned (supply-chain hardening). Bump a pin with:
+#   gh api repos/<owner>/<repo>/git/refs/tags/<tag> --jq '.object.sha'
+#
+# This mirrors the private chain-of-creation repo's CI minus its `image-scan`
+# job: there is no container here, only a library, a CLI and a WASM build.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Least-privilege GITHUB_TOKEN: only repo read is needed for build/test.
+permissions:
+  contents: read
+
+# Superseded check runs are pure waste, so this one cancels. Keyed per ref so
+# branches never queue behind one another.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go vet ./...
+      - run: go build ./...
+      - run: go test -race ./...
+
+  wasm-parity:
+    # Run the golden vectors compiled to GOOS=js/GOARCH=wasm. This proves the
+    # WebAssembly verifier shipped in web/ reproduces the spec'd digests
+    # bit-for-bit — the guarantee behind docs/verification-spec.md's
+    # "run our open reference" bar. Floating-point DCT in phash-dct-64 could in
+    # principle differ between native and wasm; running the golden test inside
+    # the wasm runtime closes that gap.
+    #
+    # pkg/status is covered here too: a divergence in fail-closed revocation
+    # resolution would surface as a false VERIFIED in the browser while native
+    # Go stayed correct.
+    #
+    # ⚠️ Packages MUST be listed EXPLICITLY — `./...` cannot be used because
+    # tessera/storage/posix does not build for js/wasm. A new package with
+    # Golden tests is invisible to this job until it is added to the line below.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Golden vectors under js/wasm
+        run: PATH="$PATH:$(go env GOROOT)/lib/wasm" GOOS=js GOARCH=wasm go test -v ./pkg/fuzzy/ ./pkg/status/ -run Golden
+      - name: WASM verifier builds
+        run: GOOS=js GOARCH=wasm go build -o /tmp/cocverify.wasm ./cmd/wasmverify
+
+  govulncheck:
+    # Install and run govulncheck directly rather than via the wrapper action,
+    # which does its own internal checkout and is brittle on some runners.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go install golang.org/x/vuln/cmd/govulncheck@latest
+      - run: govulncheck ./...
