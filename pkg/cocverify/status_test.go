@@ -117,12 +117,19 @@ func TestStatusFixturesAreWellFormed(t *testing.T) {
 }
 
 // resolve is the one call every scenario makes; only logDir, blobDir and roots
-// differ between them.
+// differ between them. logDir picks not just the tree but the (origin, vkey)
+// it was signed under: the main log and the no-anchor log are two distinct
+// logs, each under its own identity (see fixtureManifest.NoAnchorOrigin).
 func resolve(t *testing.T, logDir, blobDir string, roots [][32]byte, rawLeaf []byte) cocverify.StatusResult {
 	t.Helper()
 	m := loadManifest(t)
+	st := m.status(t)
+	origin, vkey := m.Origin, m.VKey
+	if logDir == st.NoAnchorLog {
+		origin, vkey = m.NoAnchorOrigin, m.NoAnchorVKey
+	}
 	res, err := cocverify.ResolveStatus(
-		context.Background(), fixtureFetcherFrom(t, logDir, blobDir), rawLeaf, m.Origin, m.VKey, roots,
+		context.Background(), fixtureFetcherFrom(t, logDir, blobDir), rawLeaf, origin, vkey, roots,
 	)
 	if err != nil {
 		t.Fatalf("ResolveStatus: %v", err)

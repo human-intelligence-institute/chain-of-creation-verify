@@ -50,14 +50,20 @@ type fixtureStatus struct {
 }
 
 type fixtureManifest struct {
-	GeneratedAt string         `json:"generated_at"`
-	Origin      string         `json:"origin"`
-	VKey        string         `json:"vkey"`
-	IDRoot      string         `json:"id_root"`
-	OtherRoot   string         `json:"other_root"`
-	TreeSize    uint64         `json:"tree_size"`
-	Leaves      []fixtureLeaf  `json:"leaves"`
-	Status      *fixtureStatus `json:"status"`
+	GeneratedAt string        `json:"generated_at"`
+	Origin      string        `json:"origin"`
+	VKey        string        `json:"vkey"`
+	IDRoot      string        `json:"id_root"`
+	OtherRoot   string        `json:"other_root"`
+	TreeSize    uint64        `json:"tree_size"`
+	// NoAnchorOrigin and NoAnchorVKey pin the SEPARATE (origin, key) the
+	// no-anchor log in testdata/log-noanchor is signed under. It is a
+	// distinct log from the main one, not another checkpoint for it, so it
+	// carries its own identity rather than reusing Origin/VKey.
+	NoAnchorOrigin string         `json:"no_anchor_origin"`
+	NoAnchorVKey   string         `json:"no_anchor_vkey"`
+	Leaves         []fixtureLeaf  `json:"leaves"`
+	Status         *fixtureStatus `json:"status"`
 }
 
 // status returns the status fixture block, failing the test if the manifest
@@ -123,8 +129,11 @@ func loadManifest(t *testing.T) *fixtureManifest {
 	if err := json.Unmarshal(raw, &m); err != nil {
 		t.Fatalf("parse manifest: %v", err)
 	}
-	if len(m.Leaves) == 0 || m.VKey == "" || m.Origin == "" {
+	if len(m.Leaves) == 0 || m.VKey == "" || m.Origin == "" || m.NoAnchorOrigin == "" || m.NoAnchorVKey == "" {
 		t.Fatalf("manifest is incomplete: %+v", m)
+	}
+	if m.NoAnchorOrigin == m.Origin || m.NoAnchorVKey == m.VKey {
+		t.Fatalf("the no-anchor log must be signed under its own origin/key, not the main log's: %+v", m)
 	}
 	return &m
 }
