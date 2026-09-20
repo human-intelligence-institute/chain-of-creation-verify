@@ -11,9 +11,12 @@ import "testing"
 func TestGoldenStatusParity(t *testing.T) {
 	t.Run("withdrawn", func(t *testing.T) {
 		f := newFetcherWithAnchor(t, 1, withdrawnLeaf)
-		v, e, err := Resolve(f, withdrawnLeaf, 1, f.roots)
-		if err != nil {
-			t.Fatalf("Resolve: %v", err)
+		v, e, reason, cause := Resolve(f, withdrawnLeaf, 1, f.roots)
+		if cause != nil {
+			t.Fatalf("Resolve cause: %v", cause)
+		}
+		if reason != ReasonNone {
+			t.Fatalf("reason = %q, want empty on a definite verdict", reason)
 		}
 		if v != VerdictWithdrawn {
 			t.Fatalf("verdict = %v, want WITHDRAWN", v)
@@ -25,9 +28,12 @@ func TestGoldenStatusParity(t *testing.T) {
 
 	t.Run("verified", func(t *testing.T) {
 		f := newFetcherWithAnchor(t, 1, withdrawnLeaf)
-		v, _, err := Resolve(f, [32]byte{0xab}, 1, f.roots)
-		if err != nil {
-			t.Fatalf("Resolve: %v", err)
+		v, _, reason, cause := Resolve(f, [32]byte{0xab}, 1, f.roots)
+		if cause != nil {
+			t.Fatalf("Resolve cause: %v", cause)
+		}
+		if reason != ReasonNone {
+			t.Fatalf("reason = %q, want empty on a definite verdict", reason)
 		}
 		if v != VerdictVerified {
 			t.Fatalf("verdict = %v, want VERIFIED", v)
@@ -37,12 +43,15 @@ func TestGoldenStatusParity(t *testing.T) {
 	t.Run("indeterminate", func(t *testing.T) {
 		f := newFetcherWithAnchor(t, 1, withdrawnLeaf)
 		delete(f.artifacts, 1)
-		v, _, err := Resolve(f, withdrawnLeaf, 1, f.roots)
-		if err != nil {
-			t.Fatalf("Resolve: %v", err)
-		}
+		v, _, reason, _ := Resolve(f, withdrawnLeaf, 1, f.roots)
 		if v != VerdictIndeterminate {
 			t.Fatalf("verdict = %v, want INDETERMINATE", v)
+		}
+		// The REASON must cross the native/wasm boundary intact too. A browser
+		// that reached the same verdict by a different route, or lost the
+		// reason string, would show the user something the CLI never would.
+		if reason != ReasonArtifactUnreachable {
+			t.Fatalf("reason = %q, want %q", reason, ReasonArtifactUnreachable)
 		}
 	})
 }

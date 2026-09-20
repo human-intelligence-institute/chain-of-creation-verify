@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/human-intelligence-institute/chain-of-creation-verify/pkg/leaf"
@@ -114,9 +115,12 @@ func newFetcherWithTwoAnchors(t *testing.T) *fakeFetcher {
 
 func TestNoAnchorAnywhereIsVerified(t *testing.T) {
 	f := &fakeFetcher{bundles: map[uint64][][]byte{0: {}}}
-	v, _, err := Resolve(f, [32]byte{0x01}, 0, nil)
-	if err != nil {
-		t.Fatalf("Resolve: %v", err)
+	v, _, reason, cause := Resolve(f, [32]byte{0x01}, 0, nil)
+	if cause != nil {
+		t.Fatalf("Resolve cause: %v", cause)
+	}
+	if reason != ReasonNone {
+		t.Fatalf("reason = %q, want empty on a definite verdict", reason)
 	}
 	if v != VerdictVerified {
 		t.Fatalf("verdict = %v, want VERIFIED when no anchor has ever been published", v)
@@ -125,9 +129,12 @@ func TestNoAnchorAnywhereIsVerified(t *testing.T) {
 
 func TestWithdrawnLeafIsWithdrawn(t *testing.T) {
 	f := newFetcherWithAnchor(t, 1, withdrawnLeaf)
-	v, e, err := Resolve(f, withdrawnLeaf, 1, f.roots)
-	if err != nil {
-		t.Fatalf("Resolve: %v", err)
+	v, e, reason, cause := Resolve(f, withdrawnLeaf, 1, f.roots)
+	if cause != nil {
+		t.Fatalf("Resolve cause: %v", cause)
+	}
+	if reason != ReasonNone {
+		t.Fatalf("reason = %q, want empty on a definite verdict", reason)
 	}
 	if v != VerdictWithdrawn {
 		t.Fatalf("verdict = %v, want WITHDRAWN", v)
@@ -139,9 +146,12 @@ func TestWithdrawnLeafIsWithdrawn(t *testing.T) {
 
 func TestNotWithdrawnLeafIsVerified(t *testing.T) {
 	f := newFetcherWithAnchor(t, 1, withdrawnLeaf)
-	v, _, err := Resolve(f, [32]byte{0xab}, 1, f.roots)
-	if err != nil {
-		t.Fatalf("Resolve: %v", err)
+	v, _, reason, cause := Resolve(f, [32]byte{0xab}, 1, f.roots)
+	if cause != nil {
+		t.Fatalf("Resolve cause: %v", cause)
+	}
+	if reason != ReasonNone {
+		t.Fatalf("reason = %q, want empty on a definite verdict", reason)
 	}
 	if v != VerdictVerified {
 		t.Fatalf("verdict = %v, want VERIFIED for a leaf absent from the withdrawn set", v)
@@ -151,24 +161,31 @@ func TestNotWithdrawnLeafIsVerified(t *testing.T) {
 func TestUnreachableArtifactIsIndeterminate(t *testing.T) {
 	f := newFetcherWithAnchor(t, 1, withdrawnLeaf)
 	delete(f.artifacts, 1) // anchor exists, artifact does not
-	v, _, err := Resolve(f, withdrawnLeaf, 1, f.roots)
-	if err != nil {
-		t.Fatalf("Resolve returned a hard error; want a verdict: %v", err)
-	}
+	v, _, reason, cause := Resolve(f, withdrawnLeaf, 1, f.roots)
 	if v != VerdictIndeterminate {
 		t.Fatalf("verdict = %v, want INDETERMINATE", v)
+	}
+	if reason != ReasonArtifactUnreachable {
+		t.Fatalf("reason = %q, want %q", reason, ReasonArtifactUnreachable)
+	}
+	// The cause rides ALONGSIDE the verdict. A caller that treated it as a
+	// failure would throw away a perfectly good fail-closed answer.
+	if cause == nil {
+		t.Fatal("cause = nil; a fetch failure must carry its underlying error for display")
 	}
 }
 
 func TestArtifactHashMismatchIsIndeterminate(t *testing.T) {
 	f := newFetcherWithAnchor(t, 1, withdrawnLeaf)
 	f.artifacts[1] = append(f.artifacts[1], ' ') // byte-level change breaks the hash
-	v, _, err := Resolve(f, withdrawnLeaf, 1, f.roots)
-	if err != nil {
-		t.Fatalf("Resolve: %v", err)
-	}
+	v, _, reason, _ := Resolve(f, withdrawnLeaf, 1, f.roots)
 	if v != VerdictIndeterminate {
 		t.Fatalf("verdict = %v, want INDETERMINATE on hash mismatch", v)
+	}
+	// The most serious reason in the set: corruption or equivocation, never a
+	// local network problem. A UI must not soften this into "try again".
+	if reason != ReasonArtifactHashMismatch {
+		t.Fatalf("reason = %q, want %q", reason, ReasonArtifactHashMismatch)
 	}
 }
 
@@ -177,9 +194,9 @@ func TestArtifactHashMismatchIsIndeterminate(t *testing.T) {
 func TestStaleHintDoesNotHideNewerAnchor(t *testing.T) {
 	f := newFetcherWithTwoAnchors(t)
 	f.hint = &Hint{Version: 1, AnchorIndex: 0} // stale: v2 also lives in the log
-	v, _, err := Resolve(f, onlyInV2, 2, f.roots)
-	if err != nil {
-		t.Fatalf("Resolve: %v", err)
+	v, _, _, cause := Resolve(f, onlyInV2, 2, f.roots)
+	if cause != nil {
+		t.Fatalf("Resolve cause: %v", cause)
 	}
 	if v != VerdictWithdrawn {
 		t.Fatalf("verdict = %v, want WITHDRAWN — the stale hint suppressed a newer anchor", v)
@@ -189,9 +206,9 @@ func TestStaleHintDoesNotHideNewerAnchor(t *testing.T) {
 func TestMissingHintFallsBackToFullScan(t *testing.T) {
 	f := newFetcherWithAnchor(t, 1, withdrawnLeaf)
 	f.hint, f.hintErr = nil, errNotFound
-	v, _, err := Resolve(f, withdrawnLeaf, 1, f.roots)
-	if err != nil {
-		t.Fatalf("Resolve: %v", err)
+	v, _, _, cause := Resolve(f, withdrawnLeaf, 1, f.roots)
+	if cause != nil {
+		t.Fatalf("Resolve cause: %v", cause)
 	}
 	if v != VerdictWithdrawn {
 		t.Fatalf("verdict = %v, want WITHDRAWN — a missing hint must fall back to a full scan", v)
@@ -202,12 +219,14 @@ func TestAnchorWithUnpinnedIssuerIsIgnored(t *testing.T) {
 	f := newFetcherWithAnchor(t, 1, withdrawnLeaf)
 	// An anchor signed by a key the verifier does not pin must not be trusted.
 	// With no trusted anchor remaining, there is nothing to check.
-	v, _, err := Resolve(f, withdrawnLeaf, 1, [][32]byte{{0xde, 0xad}})
-	if err != nil {
-		t.Fatalf("Resolve: %v", err)
-	}
+	v, _, reason, _ := Resolve(f, withdrawnLeaf, 1, [][32]byte{{0xde, 0xad}})
 	if v == VerdictWithdrawn {
 		t.Fatal("verdict = WITHDRAWN from an anchor signed by an unpinned key")
+	}
+	// Distinguishable from "no status was ever published", which is VERIFIED.
+	// Confusing the two is the fail-open bug this whole package exists to avoid.
+	if v != VerdictIndeterminate || reason != ReasonAnchorUntrusted {
+		t.Fatalf("verdict/reason = %v/%q, want INDETERMINATE/%q", v, reason, ReasonAnchorUntrusted)
 	}
 }
 
@@ -215,11 +234,96 @@ func TestTamperedAnchorIsIgnored(t *testing.T) {
 	f := newFetcherWithAnchor(t, 1, withdrawnLeaf)
 	raw := f.bundles[0][0]
 	raw[len(raw)-1] ^= 0xff // corrupt the signature
-	v, _, err := Resolve(f, withdrawnLeaf, 1, f.roots)
-	if err != nil {
-		t.Fatalf("Resolve: %v", err)
-	}
+	v, _, reason, _ := Resolve(f, withdrawnLeaf, 1, f.roots)
 	if v == VerdictWithdrawn {
 		t.Fatal("a signature-invalid anchor was trusted")
+	}
+	if v != VerdictIndeterminate || reason != ReasonAnchorUntrusted {
+		t.Fatalf("verdict/reason = %v/%q, want INDETERMINATE/%q", v, reason, ReasonAnchorUntrusted)
+	}
+}
+
+// errBundleFetcher fails every bundle read, standing in for a log node that is
+// unreachable rather than one that is misbehaving.
+type errBundleFetcher struct{ fakeFetcher }
+
+func (f *errBundleFetcher) FetchBundle(uint64) ([][]byte, error) {
+	return nil, fmt.Errorf("dial tcp: connection refused")
+}
+
+func TestUnreadableBundleIsIndeterminateWithScanReason(t *testing.T) {
+	f := &errBundleFetcher{}
+	v, _, reason, cause := Resolve(f, withdrawnLeaf, 1, nil)
+	if v != VerdictIndeterminate {
+		t.Fatalf("verdict = %v, want INDETERMINATE — an unreadable bundle may hide a newer anchor", v)
+	}
+	if reason != ReasonAnchorScanFailed {
+		t.Fatalf("reason = %q, want %q", reason, ReasonAnchorScanFailed)
+	}
+	// The whole point of carrying the cause: "connection refused" is local and
+	// retryable, and nothing in the Reason alone could tell a user that.
+	if cause == nil || !strings.Contains(cause.Error(), "connection refused") {
+		t.Fatalf("cause = %v, want the underlying transport error preserved", cause)
+	}
+}
+
+// TestIndeterminateAlwaysCarriesAReason is the invariant, not a case list: an
+// INDETERMINATE with no reason is exactly the opaque verdict this change
+// removed, and a definite verdict carrying one would make the field untrustworthy.
+func TestIndeterminateAlwaysCarriesAReason(t *testing.T) {
+	cases := []struct {
+		name  string
+		build func(t *testing.T) (Fetcher, [32]byte, uint64, [][32]byte)
+		want  Reason
+	}{
+		{"no anchor at all", func(t *testing.T) (Fetcher, [32]byte, uint64, [][32]byte) {
+			return &fakeFetcher{bundles: map[uint64][][]byte{0: {}}}, [32]byte{0x01}, 0, nil
+		}, ReasonNone},
+		{"withdrawn", func(t *testing.T) (Fetcher, [32]byte, uint64, [][32]byte) {
+			f := newFetcherWithAnchor(t, 1, withdrawnLeaf)
+			return f, withdrawnLeaf, 1, f.roots
+		}, ReasonNone},
+		{"bundle unreadable", func(t *testing.T) (Fetcher, [32]byte, uint64, [][32]byte) {
+			return &errBundleFetcher{}, withdrawnLeaf, 1, nil
+		}, ReasonAnchorScanFailed},
+		{"no anchor chains to a pinned root", func(t *testing.T) (Fetcher, [32]byte, uint64, [][32]byte) {
+			f := newFetcherWithAnchor(t, 1, withdrawnLeaf)
+			return f, withdrawnLeaf, 1, [][32]byte{{0xde, 0xad}}
+		}, ReasonAnchorUntrusted},
+		{"artifact missing", func(t *testing.T) (Fetcher, [32]byte, uint64, [][32]byte) {
+			f := newFetcherWithAnchor(t, 1, withdrawnLeaf)
+			delete(f.artifacts, 1)
+			return f, withdrawnLeaf, 1, f.roots
+		}, ReasonArtifactUnreachable},
+		{"artifact unparseable", func(t *testing.T) (Fetcher, [32]byte, uint64, [][32]byte) {
+			f := newFetcherWithAnchor(t, 1, withdrawnLeaf)
+			f.artifacts[1] = []byte("{not json")
+			return f, withdrawnLeaf, 1, f.roots
+		}, ReasonArtifactParseError},
+		{"artifact does not match the log", func(t *testing.T) (Fetcher, [32]byte, uint64, [][32]byte) {
+			f := newFetcherWithAnchor(t, 1, withdrawnLeaf)
+			f.artifacts[1] = append(f.artifacts[1], ' ')
+			return f, withdrawnLeaf, 1, f.roots
+		}, ReasonArtifactHashMismatch},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			f, lh, size, roots := c.build(t)
+			v, _, reason, _ := Resolve(f, lh, size, roots)
+			if reason != c.want {
+				t.Errorf("reason = %q, want %q", reason, c.want)
+			}
+			switch v {
+			case VerdictIndeterminate:
+				if reason == ReasonNone {
+					t.Error("INDETERMINATE with no reason — the caller can say nothing useful")
+				}
+			default:
+				if reason != ReasonNone {
+					t.Errorf("definite verdict %v carried reason %q", v, reason)
+				}
+			}
+		})
 	}
 }

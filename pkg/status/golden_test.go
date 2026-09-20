@@ -76,9 +76,12 @@ func TestGoldenRevocationVectorResolvesWithdrawn(t *testing.T) {
 		bundles:   map[uint64][][]byte{0: {anchor}},
 		artifacts: map[uint64][]byte{1: []byte(vecArtifact)},
 	}
-	v, e, err := Resolve(f, [32]byte(lh), 1, [][32]byte{[32]byte(root)})
-	if err != nil {
-		t.Fatalf("Resolve: %v", err)
+	v, e, reason, cause := Resolve(f, [32]byte(lh), 1, [][32]byte{[32]byte(root)})
+	if cause != nil {
+		t.Fatalf("Resolve cause: %v", cause)
+	}
+	if reason != ReasonNone {
+		t.Fatalf("reason = %q, want empty on a definite verdict", reason)
 	}
 	if v != VerdictWithdrawn {
 		t.Fatalf("verdict = %v, want WITHDRAWN for the published vector", v)

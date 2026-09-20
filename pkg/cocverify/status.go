@@ -38,6 +38,21 @@ type StatusResult struct {
 	Verdict   string         `json:"verdict"`
 	Withdrawn *WithdrawnInfo `json:"withdrawn"`
 	TreeSize  uint64         `json:"tree_size"`
+
+	// IndeterminateReason names why an INDETERMINATE verdict was reached, as one
+	// of the status.Reason values (anchor_scan_failed, anchor_untrusted,
+	// artifact_unreachable, artifact_parse_error, artifact_hash_mismatch). Empty
+	// for VERIFIED and WITHDRAWN.
+	//
+	// Deliberately NOT named Reason: WithdrawnInfo.Reason already means the
+	// human-supplied justification for a withdrawal, which is a different thing
+	// entirely, and one field shadowing the other in a UI would be a bad bug.
+	IndeterminateReason string `json:"indeterminate_reason,omitempty"`
+
+	// IndeterminateDetail is the underlying cause, for display and logs. It is
+	// diagnostic only and carries no verdict weight. Both fields are omitempty,
+	// so a definite verdict serializes exactly as it did before they existed.
+	IndeterminateDetail string `json:"indeterminate_detail,omitempty"`
 }
 
 // ResolveStatus reports whether the given raw leaf has been withdrawn by HII.
@@ -60,13 +75,20 @@ func ResolveStatus(ctx context.Context, f Fetcher, rawLeaf []byte, origin, vkey 
 	// the RFC6962 tree leaf hash used for inclusion proofs (spec §8.3).
 	leafHash := [32]byte(blake3.Sum256(rawLeaf))
 
-	verdict, entry, err := status.Resolve(
+	// The fourth value is a diagnostic cause, NOT a failure. Returning it as an
+	// error here would discard a perfectly good fail-closed INDETERMINATE and
+	// leave the caller with nothing to show.
+	verdict, entry, reason, cause := status.Resolve(
 		&bundleStatusFetcher{ctx: ctx, f: f, size: cp.Size}, leafHash, cp.Size, roots,
 	)
-	if err != nil {
-		return StatusResult{}, err
+	res := StatusResult{
+		Verdict:             string(verdict),
+		TreeSize:            cp.Size,
+		IndeterminateReason: string(reason),
 	}
-	res := StatusResult{Verdict: string(verdict), TreeSize: cp.Size}
+	if cause != nil {
+		res.IndeterminateDetail = cause.Error()
+	}
 	if entry != nil {
 		res.Withdrawn = &WithdrawnInfo{At: entry.WithdrawnAt, Reason: entry.Reason}
 	}

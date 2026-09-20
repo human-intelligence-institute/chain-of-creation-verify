@@ -791,10 +791,68 @@
           `<div class="hint">Checked against the signed status artifact that the log itself
             commits to. HII has not withdrawn this certification.</div>` };
       }
-      return { state: "a", html: html +
-        `<div class="hint"><b>Could not be determined.</b> A status artifact is published, but it
-          could not be fetched or did not match the commitment in the log. Failing closed: this
-          record is not reported as verified.</div>` };
+      // INDETERMINATE. The verdict alone is not actionable: "the log is
+      // equivocating" and "your wifi dropped" are very different situations for
+      // someone deciding whether to trust a certificate, and the old copy here
+      // asserted the artifact case for all of them — wrong for an untrusted
+      // anchor, and wrong for an unreadable bundle.
+      const WHY = {
+        anchor_scan_failed: {
+          lead: "The log could not be read.",
+          body: `Part of the log could not be fetched, so a newer withdrawal notice could be
+                 sitting there unseen. This is usually a network problem at your end and is
+                 worth retrying.`,
+          severity: "a", retry: true,
+        },
+        anchor_untrusted: {
+          lead: "Withdrawal notices exist, but none is signed by a key this page trusts.",
+          body: `That can mean HII has rotated its identity root and the trust anchor configured
+                 here is out of date — or that something is publishing notices HII did not sign.
+                 Retrying will not help; check the identity root under Advanced against a copy
+                 obtained from HII directly.`,
+          // Amber, not red: this is most often a stale trust anchor on THIS
+          // page, not evidence against the record. Red would assert something
+          // the check cannot actually establish.
+          severity: "a", retry: false,
+        },
+        artifact_unreachable: {
+          lead: "The withdrawal list could not be fetched.",
+          body: `The log names a current withdrawal list, but it could not be downloaded. Usually
+                 a network problem at your end, and worth retrying.`,
+          severity: "a", retry: true,
+        },
+        artifact_parse_error: {
+          lead: "The withdrawal list could not be read.",
+          body: `It was downloaded but is not well-formed. That is a problem at the publisher's
+                 end, not yours; retrying is unlikely to help.`,
+          severity: "a", retry: false,
+        },
+        artifact_hash_mismatch: {
+          lead: "The withdrawal list does not match what the log committed to.",
+          body: `This is the serious one. The log contains a signed commitment to a specific
+                 withdrawal list, and the list actually served does not match it — corruption, or
+                 two different answers being given to different people. Do not retry past this;
+                 report it to HII.`,
+          // The ONLY red one. Everything else here means "could not check";
+          // this means the log and the server disagree, which is evidence.
+          severity: "r", retry: false,
+        },
+      };
+      const why = WHY[st.indeterminate_reason];
+      const detail = st.indeterminate_detail
+        ? `<div class="hint" style="opacity:.75">Detail: ${st.indeterminate_detail}</div>`
+        : "";
+      if (!why) {
+        return { state: "a", html: html +
+          `<div class="hint"><b>Could not be determined.</b> Failing closed: this record is not
+            reported as verified.</div>` + detail };
+      }
+      return { state: why.severity, html: html +
+        krow("Status",
+             why.severity === "r" ? "✗ the log and the server disagree" : "could not be checked",
+             "tag " + why.severity) +
+        `<div class="hint"><b>${why.lead}</b> ${why.body}
+          <br><br>Failing closed: this record is <b>not</b> reported as verified.</div>` + detail };
     }
 
     const SIMILARITY_INFO = '<span class="info" tabindex="0" role="button" aria-label="What the similarity check means">i<span class="tip">The similarity check looks to see if the uploaded file is sufficiently similar to the certified file that they can reasonably be considered the same. This accounts for minor formatting differences or differing file types. For example: a doc and a pdf of the same content.</span></span>';
