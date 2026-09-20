@@ -31,14 +31,43 @@ type fixtureLeaf struct {
 	Bytes string `json:"bytes"`
 }
 
+// fixtureStatus describes the revocation-status fixtures: the anchor committed
+// to the main log, the artifact version it names, the two leaves the status
+// tests resolve, and the blob roots the broken scenarios select.
+type fixtureStatus struct {
+	AnchorLeaf        string `json:"anchor_leaf"`
+	AnchorIndex       uint64 `json:"anchor_index"`
+	ArtifactVersion   uint64 `json:"artifact_version"`
+	WithdrawnLeaf     string `json:"withdrawn_leaf"`
+	WithdrawnLeafHash string `json:"withdrawn_leaf_hash"`
+	LiveLeaf          string `json:"live_leaf"`
+	LiveLeafHash      string `json:"live_leaf_hash"`
+	GoodDir           string `json:"good_dir"`
+	BadDir            string `json:"bad_dir"`
+	GoneDir           string `json:"gone_dir"`
+	NoAnchorLog       string `json:"no_anchor_log"`
+	NoAnchorTreeSize  uint64 `json:"no_anchor_tree_size"`
+}
+
 type fixtureManifest struct {
-	GeneratedAt string        `json:"generated_at"`
-	Origin      string        `json:"origin"`
-	VKey        string        `json:"vkey"`
-	IDRoot      string        `json:"id_root"`
-	OtherRoot   string        `json:"other_root"`
-	TreeSize    uint64        `json:"tree_size"`
-	Leaves      []fixtureLeaf `json:"leaves"`
+	GeneratedAt string         `json:"generated_at"`
+	Origin      string         `json:"origin"`
+	VKey        string         `json:"vkey"`
+	IDRoot      string         `json:"id_root"`
+	OtherRoot   string         `json:"other_root"`
+	TreeSize    uint64         `json:"tree_size"`
+	Leaves      []fixtureLeaf  `json:"leaves"`
+	Status      *fixtureStatus `json:"status"`
+}
+
+// status returns the status fixture block, failing the test if the manifest
+// predates it. An absent block must never read as a passing scenario.
+func (m *fixtureManifest) status(t *testing.T) *fixtureStatus {
+	t.Helper()
+	if m.Status == nil {
+		t.Fatal("manifest has no status block; regenerate the fixtures")
+	}
+	return m.Status
 }
 
 // raw returns the raw bytes of the named leaf, failing the test if it is absent
@@ -106,11 +135,24 @@ func loadManifest(t *testing.T) *fixtureManifest {
 // os.ErrNotExist, which is the client's documented not-found contract.
 func fixtureFetcher(t *testing.T) cocverify.Fetcher {
 	t.Helper()
-	root := filepath.Join(fixtureDir, "log")
+	return fixtureFetcherFrom(t, "log", "")
+}
+
+// fixtureFetcherFrom is fixtureFetcher over a chosen log tree, optionally with a
+// Blob function serving the "status/..." objects out of blobDir.
+//
+// Only the directories change between scenarios: the reading code is the same
+// in every case, so a scenario's verdict can only come from the fixture bytes it
+// selected, never from a fetcher wired differently.
+//
+// blobDir == "" leaves Blob nil, which is what the non-status tests want.
+func fixtureFetcherFrom(t *testing.T, logDir, blobDir string) cocverify.Fetcher {
+	t.Helper()
+	root := filepath.Join(fixtureDir, logDir)
 	read := func(rel string) ([]byte, error) {
 		return os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
 	}
-	return cocverify.Fetcher{
+	f := cocverify.Fetcher{
 		Checkpoint: func(context.Context) ([]byte, error) {
 			return read(layout.CheckpointPath)
 		},
@@ -121,6 +163,14 @@ func fixtureFetcher(t *testing.T) cocverify.Fetcher {
 			return read(layout.EntriesPath(bundleIndex, p))
 		},
 	}
+	if blobDir != "" {
+		f.Blob = func(_ context.Context, path string) ([]byte, error) {
+			// The adapter only ever asks for "status/<object>"; the scenario
+			// picks which directory that prefix resolves to.
+			return os.ReadFile(filepath.Join(fixtureDir, blobDir, filepath.Base(path)))
+		}
+	}
+	return f
 }
 
 // TestFixtureTreeIsWellFormed guards the fixture itself. If the frozen tree were
@@ -135,6 +185,7 @@ func TestFixtureTreeIsWellFormed(t *testing.T) {
 	for _, name := range []string{
 		"inclusion-attestation", "identity-binding",
 		"identity-attestation", "identity-binding-other-key",
+		"status-live-attestation", "status-withdrawn-attestation", "status-anchor",
 	} {
 		l := m.leaf(t, name)
 		if l.Index >= m.TreeSize {
