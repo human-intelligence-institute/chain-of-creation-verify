@@ -241,6 +241,13 @@ func TestResolveStatus_ArtifactMissing_Indeterminate(t *testing.T) {
 	if res.Verdict != "INDETERMINATE" {
 		t.Fatalf("verdict = %s, want INDETERMINATE when the anchored artifact cannot be fetched", res.Verdict)
 	}
+	// Fail-closed is only half the job: the caller must be able to say WHY.
+	if res.IndeterminateReason != "artifact_unreachable" {
+		t.Fatalf("reason = %q, want artifact_unreachable", res.IndeterminateReason)
+	}
+	if res.IndeterminateDetail == "" {
+		t.Fatal("no detail on a fetch failure — a user cannot tell a local outage from a missing file")
+	}
 	if res.Withdrawn != nil {
 		t.Fatalf("withdrawal detail from an unfetchable artifact: %+v", res.Withdrawn)
 	}
@@ -276,6 +283,12 @@ func TestResolveStatus_ArtifactHashMismatch_Indeterminate(t *testing.T) {
 		}
 		if res.Withdrawn != nil {
 			t.Fatalf("%s: withdrawal detail from a hash-mismatched artifact: %+v", name, res.Withdrawn)
+		}
+		// This reason must be distinguishable from a fetch failure: it is the
+		// only one that is evidence of corruption or equivocation rather than
+		// of a bad network, and the UI colours it differently for that reason.
+		if res.IndeterminateReason != "artifact_hash_mismatch" {
+			t.Fatalf("%s: reason = %q, want artifact_hash_mismatch", name, res.IndeterminateReason)
 		}
 		if res.TreeSize != m.TreeSize {
 			t.Fatalf("%s: tree size %d, want %d", name, res.TreeSize, m.TreeSize)
@@ -313,6 +326,11 @@ func TestResolveStatus_UnpinnedIssuer_Indeterminate(t *testing.T) {
 	if res.Verdict != "INDETERMINATE" {
 		t.Fatalf("verdict = %s, want INDETERMINATE: an unverifiable published status must not read as clean", res.Verdict)
 	}
+	// Separates "HII rotated its identity root and this verifier is stale" from
+	// "the log is lying" — which is why the page treats this one as amber.
+	if res.IndeterminateReason != "anchor_untrusted" {
+		t.Fatalf("reason = %q, want anchor_untrusted", res.IndeterminateReason)
+	}
 }
 
 // --- the adapter's own nil-Blob guard ---
@@ -333,5 +351,8 @@ func TestResolveStatus_NoBlobFetcher_Indeterminate(t *testing.T) {
 	res := resolve(t, "log", "", [][32]byte{root}, raw) // blobDir "" → Blob is nil
 	if res.Verdict != "INDETERMINATE" {
 		t.Fatalf("verdict = %s, want INDETERMINATE with no blob fetcher configured", res.Verdict)
+	}
+	if res.IndeterminateReason != "artifact_unreachable" {
+		t.Fatalf("reason = %q, want artifact_unreachable", res.IndeterminateReason)
 	}
 }

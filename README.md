@@ -219,6 +219,34 @@ with an end-to-end smoke against its running transparency log. **An outside audi
 run that**, and nothing in this repository substitutes for it. If you are auditing this code,
 that is the honest boundary of what you can independently reproduce.
 
+## Why a verdict is INDETERMINATE
+
+Revocation status fails closed: if a status anchor exists and its artifact cannot be
+obtained and hash-matched, the verdict is `INDETERMINATE`, never `VERIFIED`. That is the
+property separating this from OCSP soft-fail, where blocking one request buys a clean pass.
+
+But the verdict alone is not actionable, and that matters for anyone building on this.
+`INDETERMINATE` spans a log that is equivocating and a laptop that is offline. So
+`status.Resolve` returns a typed reason alongside it, surfaced as `indeterminate_reason` on
+`cocverify.StatusResult` and in the WASM bridge's JSON:
+
+| reason | what it means | retrying helps |
+|---|---|---|
+| `anchor_scan_failed` | an entry bundle could not be read, so a newer withdrawal may be unseen | usually |
+| `anchor_untrusted` | anchors exist but none is signed by a pinned identity root — possibly a root rotation this verifier has not picked up | no |
+| `artifact_unreachable` | a trusted anchor names a withdrawal list that could not be fetched | usually |
+| `artifact_parse_error` | the list was fetched but is malformed | no |
+| `artifact_hash_mismatch` | **the list served does not match what the log committed to** — corruption, or equivocation | no |
+
+`indeterminate_detail` carries the underlying error for display. It is diagnostic only and
+carries no verdict weight — a caller that treats it as a failure throws away a perfectly
+good fail-closed answer.
+
+The last row is the only one that is *evidence* rather than an inability to check, and the
+hosted verifier colours it differently for that reason. If you port this spec, we would
+encourage reporting the reason too: a verifier that can only print the word "indeterminate"
+teaches users to read it as noise, and fail-closed then quietly degrades into fail-ignored.
+
 ## API stability
 
 `pkg/cocverify` is the **supported public API** of this repository. It is the small,

@@ -167,9 +167,12 @@ func TestPublishedAnchorVerifiesAndCommitsToTheArtifact(t *testing.T) {
 	// End to end: resolving against exactly what was published must say WITHDRAWN.
 	f := &publishedFetcher{w: w, anchorIdx: res.AnchorIndex, leaves: a.leaves}
 	lh := mustLeafHash(t, sampleWithdrawal.LeafHashB64)
-	v, e, err := Resolve(f, lh, 1, [][32]byte{[32]byte(pub)})
-	if err != nil {
-		t.Fatalf("Resolve: %v", err)
+	v, e, reason, cause := Resolve(f, lh, 1, [][32]byte{[32]byte(pub)})
+	if cause != nil {
+		t.Fatalf("Resolve cause: %v", cause)
+	}
+	if reason != ReasonNone {
+		t.Fatalf("reason = %q, want empty on a definite verdict", reason)
 	}
 	if v != VerdictWithdrawn {
 		t.Fatalf("verdict = %v, want WITHDRAWN against freshly published state", v)
