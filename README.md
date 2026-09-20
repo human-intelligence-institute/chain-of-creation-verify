@@ -94,18 +94,65 @@ go test ./pkg/fuzzy/... ./pkg/status/... -run Golden -v
 A full test run (`go test ./...`) exercises all eight packages, including the WebAssembly
 build's parity test against the same golden vectors (`wasm_parity_test.go`).
 
+## Verifying the hosted verifier
+
+The WebAssembly verifier HII serves in the browser is built from this module — there is no
+separate source for it. You can rebuild it yourself and compare bytes:
+
+```sh
+mkdir /tmp/verify-check && cd /tmp/verify-check
+go mod init check
+go get github.com/human-intelligence-institute/chain-of-creation-verify/cmd/wasmverify@v1.0.0
+GOOS=js GOARCH=wasm go build -trimpath -o mine.wasm \
+  github.com/human-intelligence-institute/chain-of-creation-verify/cmd/wasmverify
+curl -sO https://<verifier-host>/cocverify.wasm
+shasum -a 256 mine.wasm cocverify.wasm   # must match
+```
+
+> ⚠️ The build must treat this repository as a **dependency**, exactly as above. Cloning the
+> repo and running `go build ./cmd/wasmverify` produces **different bytes even with
+> `-trimpath`**, because Go embeds `debug.BuildInfo` recording which module is the main
+> module. That difference is **not** evidence of tampering.
+
+Three other things will change the bytes, so get them right before concluding anything:
+
+- `go get` must name the **package** path (`.../cmd/wasmverify@vX.Y.Z`), not just the module
+  path. Fetching the module alone does not record the `go.sum` entries the build needs, and
+  the build fails rather than silently differing.
+- Use the tag the host is actually serving, not `@latest`.
+- Build with the Go toolchain this module's `go.mod` requires. A different Go version
+  produces a different binary.
+
+Substitute `<verifier-host>` with the host you are checking. HII's verifier is currently
+served from a CloudFront distribution and has no permanent custom domain yet, so rather than
+freeze a hostname here: take it from the URL of the verifier page you are auditing, or ask
+HII directly.
+
+From the next tagged release onward, each tag publishes `cocverify.wasm` and
+`cocverify.wasm.sha256` as GitHub Release assets, built by `.github/workflows/release.yml` in
+exactly the dependency-module way shown above; that published sha256 is the value both your
+own build and the served file should have. `v1.0.0` predates that workflow — it exists as a
+tag only, with no release assets, so for `v1.0.0` the comparison above is the check.
+
 ## Known gap
 
-Two tests — covering Merkle log-inclusion proofs and identity resolution end-to-end — were
-parked during extraction from HII's internal monorepo because they depended on a live
-transparency log that stays private and could not be included here. The underlying code
-paths (`internal/verify`, `pkg/identity`) are present and used by `cmd/hiiverify` and
-`cmd/wasmverify`; what's missing is test coverage against a public fixture. Rewriting these
-against committed static fixtures (a recorded checkpoint + tile set, rather than a live
-node) is follow-up work. If you're auditing this code, treat inclusion-proof and
-identity-resolution verification as **less independently test-covered** than the rest of
-the codebase until that follow-up lands — an auditor should hear this from us, not
-discover it.
+Inclusion proofs, identity resolution and revocation status **are** covered by tests.
+`pkg/cocverify/inclusion_test.go`, `pkg/cocverify/identity_test.go` and
+`pkg/cocverify/status_test.go` run against a frozen log fixture committed under
+`pkg/cocverify/testdata/`: a recorded checkpoint, tiles, entry bundles and a manifest. (An
+earlier version of this README said those tests were parked during extraction and that
+fixture coverage was follow-up work. That is no longer true — this paragraph replaces it.)
+
+The fixture is deliberately the material a third party actually has: static log artifacts,
+not a live node. You can run the suite offline and get the same result we do.
+
+What remains genuinely weaker is this: the fixtures exercise the verifier against a
+**recorded** log, so they cannot catch a regression that only appears against a live, growing
+one — tile boundaries that move as the tree grows, a checkpoint that advances between
+requests, a log node that answers differently from the recording. HII covers that separately
+with an end-to-end smoke against its running transparency log. **An outside auditor cannot
+run that**, and nothing in this repository substitutes for it. If you are auditing this code,
+that is the honest boundary of what you can independently reproduce.
 
 ## API stability
 
