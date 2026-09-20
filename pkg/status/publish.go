@@ -9,7 +9,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/human-intelligence-institute/chain-of-creation/internal/leaf"
+	"github.com/human-intelligence-institute/chain-of-creation-verify/pkg/leaf"
 	"github.com/zeebo/blake3"
 )
 

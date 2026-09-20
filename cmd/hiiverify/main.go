@@ -17,11 +17,11 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/human-intelligence-institute/chain-of-creation/internal/fuzzy"
-	"github.com/human-intelligence-institute/chain-of-creation/internal/identity"
-	"github.com/human-intelligence-institute/chain-of-creation/internal/leaf"
-	"github.com/human-intelligence-institute/chain-of-creation/internal/provenance"
-	"github.com/human-intelligence-institute/chain-of-creation/internal/verify"
+	"github.com/human-intelligence-institute/chain-of-creation-verify/pkg/fuzzy"
+	"github.com/human-intelligence-institute/chain-of-creation-verify/pkg/identity"
+	"github.com/human-intelligence-institute/chain-of-creation-verify/pkg/leaf"
+	"github.com/human-intelligence-institute/chain-of-creation-verify/internal/provenance"
+	"github.com/human-intelligence-institute/chain-of-creation-verify/internal/verify"
 )
 
 type stringList []string

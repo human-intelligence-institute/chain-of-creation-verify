@@ -13,7 +13,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/human-intelligence-institute/chain-of-creation/internal/leaf"
+	"github.com/human-intelligence-institute/chain-of-creation-verify/pkg/leaf"
 )
 
 // Digester computes a fuzzy digest from raw media bytes.

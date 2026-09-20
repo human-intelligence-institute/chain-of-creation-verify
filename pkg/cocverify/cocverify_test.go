@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/human-intelligence-institute/chain-of-creation/internal/attest"
-	"github.com/human-intelligence-institute/chain-of-creation/internal/fuzzy"
-	"github.com/human-intelligence-institute/chain-of-creation/internal/identity"
-	"github.com/human-intelligence-institute/chain-of-creation/internal/leaf"
+	"github.com/human-intelligence-institute/chain-of-creation-verify/pkg/attest"
+	"github.com/human-intelligence-institute/chain-of-creation-verify/pkg/fuzzy"
+	"github.com/human-intelligence-institute/chain-of-creation-verify/pkg/identity"
+	"github.com/human-intelligence-institute/chain-of-creation-verify/pkg/leaf"
 )
 
 func TestVerifyLeafAttestationWithMedia(t *testing.T) {

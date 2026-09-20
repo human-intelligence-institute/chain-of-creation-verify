@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/human-intelligence-institute/chain-of-creation/internal/fuzzy"
-	"github.com/human-intelligence-institute/chain-of-creation/internal/leaf"
+	"github.com/human-intelligence-institute/chain-of-creation-verify/pkg/fuzzy"
+	"github.com/human-intelligence-institute/chain-of-creation-verify/pkg/leaf"
 )
 
 func TestBuildText(t *testing.T) {

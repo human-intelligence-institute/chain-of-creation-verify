@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/human-intelligence-institute/chain-of-creation/internal/leaf"
+	"github.com/human-intelligence-institute/chain-of-creation-verify/pkg/leaf"
 )
 
 func key(t *testing.T) (ed25519.PublicKey, ed25519.PrivateKey) {

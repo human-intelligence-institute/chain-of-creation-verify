@@ -4,9 +4,9 @@ import (
 	"encoding/hex"
 	"sort"
 
-	"github.com/human-intelligence-institute/chain-of-creation/internal/identity"
-	"github.com/human-intelligence-institute/chain-of-creation/internal/provenance"
-	"github.com/human-intelligence-institute/chain-of-creation/internal/status"
+	"github.com/human-intelligence-institute/chain-of-creation-verify/pkg/identity"
+	"github.com/human-intelligence-institute/chain-of-creation-verify/internal/provenance"
+	"github.com/human-intelligence-institute/chain-of-creation-verify/pkg/status"
 )
 
 // Report is the full verification result for a work.

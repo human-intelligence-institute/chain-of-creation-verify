@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/human-intelligence-institute/chain-of-creation/internal/status"
+	"github.com/human-intelligence-institute/chain-of-creation-verify/pkg/status"
 	"github.com/transparency-dev/formats/note"
 	"github.com/transparency-dev/tessera/api/layout"
 	"github.com/transparency-dev/tessera/client"

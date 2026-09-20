@@ -10,8 +10,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/human-intelligence-institute/chain-of-creation/internal/fuzzy"
-	"github.com/human-intelligence-institute/chain-of-creation/internal/leaf"
+	"github.com/human-intelligence-institute/chain-of-creation-verify/pkg/fuzzy"
+	"github.com/human-intelligence-institute/chain-of-creation-verify/pkg/leaf"
 )
 
 // Params describes the event being attested. AlgorithmID is optional: when

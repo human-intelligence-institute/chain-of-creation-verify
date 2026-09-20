@@ -40,7 +40,7 @@ import (
 	"strings"
 	"syscall/js"
 
-	"github.com/human-intelligence-institute/chain-of-creation/pkg/cocverify"
+	"github.com/human-intelligence-institute/chain-of-creation-verify/pkg/cocverify"
 	"github.com/transparency-dev/tessera/client"
 )
 

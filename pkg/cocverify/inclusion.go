@@ -15,7 +15,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/human-intelligence-institute/chain-of-creation/internal/verify"
+	"github.com/human-intelligence-institute/chain-of-creation-verify/internal/verify"
 	"github.com/transparency-dev/tessera/client"
 	"golang.org/x/mod/sumdb/note"
 )

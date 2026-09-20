@@ -22,9 +22,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/human-intelligence-institute/chain-of-creation/internal/identity"
-	"github.com/human-intelligence-institute/chain-of-creation/internal/leaf"
-	"github.com/human-intelligence-institute/chain-of-creation/internal/verify"
+	"github.com/human-intelligence-institute/chain-of-creation-verify/pkg/identity"
+	"github.com/human-intelligence-institute/chain-of-creation-verify/pkg/leaf"
+	"github.com/human-intelligence-institute/chain-of-creation-verify/internal/verify"
 	"github.com/transparency-dev/tessera/api/layout"
 	"github.com/transparency-dev/tessera/client"
 	"golang.org/x/mod/sumdb/note"

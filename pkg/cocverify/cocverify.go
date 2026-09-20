@@ -11,9 +11,9 @@ import (
 	"encoding/hex"
 	"errors"
 
-	"github.com/human-intelligence-institute/chain-of-creation/internal/fuzzy"
-	"github.com/human-intelligence-institute/chain-of-creation/internal/leaf"
-	"github.com/human-intelligence-institute/chain-of-creation/internal/verify"
+	"github.com/human-intelligence-institute/chain-of-creation-verify/pkg/fuzzy"
+	"github.com/human-intelligence-institute/chain-of-creation-verify/pkg/leaf"
+	"github.com/human-intelligence-institute/chain-of-creation-verify/internal/verify"
 )
 
 // LeafResult is the JSON-serializable outcome of verifying one leaf.

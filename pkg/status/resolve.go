@@ -3,7 +3,7 @@ package status
 import (
 	"errors"
 
-	"github.com/human-intelligence-institute/chain-of-creation/internal/leaf"
+	"github.com/human-intelligence-institute/chain-of-creation-verify/pkg/leaf"
 )
 
 // BundleSize is the tlog-tiles entry bundle width. Scanning happens a bundle at

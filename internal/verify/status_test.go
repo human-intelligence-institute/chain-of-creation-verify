@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/human-intelligence-institute/chain-of-creation/internal/status"
+	"github.com/human-intelligence-institute/chain-of-creation-verify/pkg/status"
 )
 
 func twoEventReport() *Report {

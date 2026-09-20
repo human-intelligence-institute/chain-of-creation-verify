@@ -9,7 +9,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/human-intelligence-institute/chain-of-creation/internal/leaf"
+	"github.com/human-intelligence-institute/chain-of-creation-verify/pkg/leaf"
 )
 
 // Issuer holds the HII identity-root key and mints signed IdentityBindings.
