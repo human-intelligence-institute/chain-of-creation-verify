@@ -1,12 +1,13 @@
-# chain-of-creation — Verification Specification (v1.1)
+# chain-of-creation — Verification Specification (v1.2)
 
 This document is the **public contract** for independently verifying a
 chain-of-creation record. It describes the byte-exact formats and algorithms a
 third party needs to check a leaf on their own, and it is **self-contained**: every
 algorithm is specified here in enough detail to implement without reading HII code.
 HII's reference implementation (`pkg/cocverify`, compiled to WebAssembly for the hosted
-verifier) is not currently published — it is available on request, and auditing it is an
-alternative to porting, never a prerequisite. The pinned trust anchors needed for §8 and
+verifier) **is published**, under Apache-2.0, at
+`https://github.com/human-intelligence-institute/chain-of-creation-verify`. Auditing it is
+an alternative to porting this document, never a prerequisite. The pinned trust anchors needed for §8 and
 §9 **are** published; see **§11**.
 
 > **Scope of this version.** This spec covers **leaf parsing, Ed25519 signatures,
@@ -25,7 +26,7 @@ alternative to porting, never a prerequisite. The pinned trust anchors needed fo
 |-------|-----------|--------------------------------|----------|
 | Exact content match | BLAKE3-256 or SHA-256 (named by `ExactAlg`) | **Yes, universally** (both have many independent implementations) | **Strong** — a match proves byte-identical media |
 | Signature | Ed25519 | **Yes, universally** | **Strong** — proves the leaf was signed by the holder of `SignerPubKey` |
-| Fuzzy content match | `simhash64-v1` (SHA-256 features) / `phash-dct-64` | **Yes** for `simhash64-v1` — SHA-256 has one definition in every language; pHash only by running our reference | **Advisory** — see below |
+| Fuzzy content match | `simhash64-v1` (SHA-256 features) / `phash-dct-64` | **Yes, bit-exact** for `simhash64-v1` — integer arithmetic over SHA-256, one definition in every language. **Not unconditionally** for `phash-dct-64` — it thresholds floating-point values and is bit-exact only for images whose spectrum is not degenerate (§6.2) | **Advisory** — see below |
 | Log inclusion | RFC6962 Merkle proof under a pinned-key checkpoint (§8) | **Yes** — fetch checkpoint + tiles, reconstruct the proof | **Strong** — proves the leaf is committed in the published log |
 | Identity (key → creator) | Ed25519-signed `IdentityBinding`, proven included (§9) | **Yes** — verify the binding named by the receipt | **Strong** (for HII's vouch) — proves HII bound the key to the creator and logged it |
 
@@ -224,14 +225,36 @@ resolvable for older leaves; `phash-dct-64` (§6.2) covers images.
 
 **Threshold:** `0.1875` (≤ 12 differing bits).
 
-> **Known limitation (re-implementers).** This hash uses floating-point DCT and
-> median comparison. An *independent* implementation may differ by one or two bits
-> from ours for coefficients that sit very close to the median, because of
-> floating-point rounding differences. **Running our reference implementation is
-> bit-exact** (our native and WebAssembly builds compile the same Go math and agree —
-> CI runs the golden vectors under `GOOS=js GOARCH=wasm` to prove it). If you
-> re-implement, allow a small tolerance, or run our reference for an authoritative
-> digest.
+> **Known limitation — `phash-dct-64` is not unconditionally reproducible.**
+>
+> *This note replaces a weaker one. An earlier revision said an independent implementation
+> "may differ by one or two bits" and that running our reference implementation is
+> bit-exact. Both claims were too strong, and measurement in 2026-09 disproved the second.*
+>
+> Step 6 compares each coefficient against the median with a bare `>` and **no tolerance
+> for ties**. For an image whose low-frequency spectrum is *degenerate* — a flat fill, a
+> linear gradient, perfectly repeating bands, much synthetic graphic art — the non-DC
+> coefficients collapse onto a median that is itself numerically zero, and each of those
+> bits is then decided by floating-point rounding rather than by the image.
+>
+> Measured on a 128×128 horizontal-band PNG: **59 of the 63 non-DC coefficients fell within
+> 1e-6 of a median of 3.0e-28**, and the digest was `6d696d216d006d6f` compiled natively
+> against `796979097900797b` under `GOOS=js GOARCH=wasm` — **6 differing bits from the same
+> implementation on the same input**. A structured image measured in the same run had one
+> near-median coefficient and was bit-identical on both.
+>
+> So: running our reference is **not** a guarantee of a bit-exact digest, and neither is
+> agreement between two correct independent implementations. What holds is that the
+> **verdict** is stable — 6 bits is 0.09375, well inside the 0.1875 threshold — and that
+> photographs, the overwhelming majority of real inputs, are not degenerate in this way.
+>
+> **If you re-implement:** compare by distance against the threshold, never by digest
+> equality, and do not treat a small digest difference on synthetic imagery as evidence of
+> a non-conforming implementation. `simhash64-v1` carries no such caveat and is exact.
+>
+> This is a property of the published algorithm, not a defect being fixed: adding a tie
+> tolerance would change published digests and therefore requires a **new algorithm id**
+> (§10), never an in-place edit.
 
 ### 6.3 `simhash64-v1` (text) — canonical
 
@@ -300,8 +323,12 @@ only their standard library — no HII code, no variant ambiguity.
 
 ## 7. Golden vectors
 
-Any conforming implementation MUST reproduce these digests exactly. They are also asserted by HII's own test
-suites; the image inputs are fixed files, available on request.
+Any conforming implementation MUST reproduce the `simhash64-v1` and `simhash-text-v1`
+digests **exactly**; those are integer arithmetic over SHA-256 and admit no rounding. The
+`phash-dct-64` vectors below are asserted bit-for-bit by HII's own suites, but see the
+limitation in §6.2 before treating a small difference as non-conformance — that algorithm
+is exact only for non-degenerate images. All vector inputs, including the image files, are
+in the published reference repository (`pkg/fuzzy/testdata/`, `spec/`).
 
 ### `simhash64-v1`
 
@@ -347,6 +374,12 @@ identically — that reformatting-invariance is the point of the fuzzy digest.
 
 The PNG and JPEG of the same image hash identically (distance 0) despite lossy
 recompression; the different image is far away (`distance(a,b) = popcount(f8f8f8f8f8070605 ⊕ 2d126d926d2d936d)/64`).
+
+> ⚠️ These three vectors reproduce bit-for-bit on every platform HII tests, but the margin
+> on `gradient-a` is thin: one of its coefficients sits **1.6e-13** from the median natively
+> and **9.0e-13** under WebAssembly. It falls on the same side of the comparison in both, so
+> the digest holds — but by rounding, not by design. Treat a one-bit difference here as
+> expected variation rather than a failed conformance test, and see §6.2.
 
 ### Revocation (§12)
 
@@ -504,8 +537,15 @@ log error, and §12 specifies how to avoid it.
 
 ## 10. Versioning
 
-This spec is **v1.1**. Revision 1.1 adds the `StatusAnchor` leaf (§3.3) and
-revocation status (§12).
+This spec is **v1.2**.
+
+Revision **1.2 changes no algorithm, threshold, or wire format.** It corrects statements
+this document made about itself: that the reference implementation was unpublished (it is
+published, Apache-2.0), and that `phash-dct-64` digests are bit-exact when produced by that
+reference (they are not, for degenerate images — §6.2). A verifier written against v1.1
+remains conforming; only the document's claims changed.
+
+Revision 1.1 added the `StatusAnchor` leaf (§3.3) and revocation status (§12).
 
 Leaf kinds are **additive** and not a breaking change: every leaf written under v1
 decodes unchanged, and a v1 reader skips unrecognised kinds. The **verifier verdict
@@ -690,22 +730,27 @@ presented, not of how it is computed.
 
 ## Appendix A. Implementation index (internal)
 
-The sections above deliberately contain no source-tree paths: this document is published
-externally, and a reader outside HII cannot open them. The mapping is preserved here for
-HII engineers.
+The sections above deliberately contain no source-tree paths, so the body stays readable
+as a standalone contract. The mapping is kept here. ⚠️ The paths below moved from
+`internal/` to `pkg/` when the reference was extracted into its own public repository —
+Go's `internal/` rule is module-scoped, so packages other HII repositories import could
+not stay internal. They now resolve in
+`https://github.com/human-intelligence-institute/chain-of-creation-verify`, so an outside
+reader CAN open them.
 
 | Spec section | Implementation |
 |---|---|
-| §2 Encoding primitives | `internal/leaf/codec.go` |
-| §3.1 Attestation | `internal/leaf/attestation.go` |
-| §3.2 IdentityBinding | `internal/leaf/binding.go` |
-| §6.1 `simhash-text-v1` | `internal/fuzzy/simhash.go` |
-| §6.2 `phash-dct-64` | `internal/fuzzy/phash.go` |
-| §6.3 `simhash64-v1` | `internal/fuzzy/simhash64.go` |
-| §7 Golden vectors | `spec/simhash64-vectors.json`, `internal/fuzzy/golden_test.go`, `internal/fuzzy/testdata/`, `internal/status/golden_test.go` |
+| §2 Encoding primitives | `pkg/leaf/codec.go` |
+| §3.1 Attestation | `pkg/leaf/attestation.go` |
+| §3.2 IdentityBinding | `pkg/leaf/binding.go` |
+| §6.1 `simhash-text-v1` | `pkg/fuzzy/simhash.go` |
+| §6.2 `phash-dct-64` | `pkg/fuzzy/phash.go` |
+| §6.3 `simhash64-v1` | `pkg/fuzzy/simhash64.go` |
+| §7 Golden vectors | `spec/simhash64-vectors.json`, `pkg/fuzzy/golden_test.go`, `pkg/fuzzy/testdata/`, `pkg/status/golden_test.go` |
 | §8 Log inclusion | `pkg/cocverify/inclusion.go` |
 | §9 Identity resolution | `pkg/cocverify/identity.go` |
-| §12 Revocation and status | `internal/leaf/status.go`, `internal/status/`, `pkg/cocverify/status.go` |
+| §12 Revocation and status | `pkg/leaf/status.go`, `pkg/status/`, `pkg/cocverify/status.go` |
+| Frozen leaf corpus | `pkg/cocverify/testdata/corpus/`, `cmd/gencorpus` |
 | §11 Trust anchors | `cmd/hiipub` derives them; served as `config.json` |
 
 **When editing this document, keep it publication-ready:** put source paths here, not in
