@@ -1,6 +1,6 @@
 module github.com/human-intelligence-institute/chain-of-creation-verify
 
-go 1.26.6
+go 1.26.9
 
 require (
 	github.com/transparency-dev/formats v0.0.0-20251017110053-404c0d5b696c
