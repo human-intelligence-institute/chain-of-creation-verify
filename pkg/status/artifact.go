@@ -41,10 +41,11 @@ type Artifact struct {
 // hash of the RAW bytes supplied.
 //
 // Hashing the bytes as received — never a re-serialisation — is deliberate and
-// load-bearing. The producer is Python and this verifier is Go; if the hash
-// were taken over a Go re-encoding, any difference in key ordering, spacing or
-// HTML escaping between the two languages would break the comparison against
-// the anchor and yield a permanent, spurious INDETERMINATE verdict.
+// load-bearing. The producer (Publish, today) and a verifier need not share an
+// implementation or even a language; if the hash were taken over a re-encoding,
+// any difference in key ordering, spacing or HTML escaping between the two
+// would break the comparison against the anchor and yield a permanent, spurious
+// INDETERMINATE verdict.
 func ParseArtifact(raw []byte) (*Artifact, [32]byte, error) {
 	h := [32]byte(blake3.Sum256(raw))
 
