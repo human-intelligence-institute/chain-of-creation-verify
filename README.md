@@ -83,7 +83,8 @@ live trust anchor; obtain current anchors from HII directly.
 ## Reproducing the golden vectors
 
 `pkg/fuzzy/golden_test.go` and `pkg/status/golden_test.go` freeze the exact wire output of
-the published algorithms (`simhash-text-v1`, `phash-dct-64`, and related digests). They are
+the published algorithms (`simhash64-v1` via `spec/simhash64-vectors.json`,
+`simhash-text-v1`, `phash-dct-64`) and the revocation status artifact. They are
 the machine-checkable half of the spec: a third-party reimplementation should reproduce
 these digests byte-for-byte. Run them with:
 
@@ -136,8 +137,8 @@ Photographs never look like this; synthetic graphics can, and `digital-art` is a
 media type. So for such images, "a third party reproduces the digest byte-for-byte" is not
 unconditionally true of `phash-dct-64` the way it is of `simhash64-v1` (pure integer
 arithmetic over SHA-256). The match threshold absorbs the difference in practice — 6 bits is
-well inside it — but an implementer comparing digests exactly should know this exists. It is
-tracked as a spec issue; `docs/verification-spec.md` does not yet say so.
+well inside it — but an implementer comparing digests exactly should know this exists. The
+spec states this from v1.2 (§6.2).
 
 ## Verifying the hosted verifier
 
